@@ -3,9 +3,11 @@
 
 import { useState, useEffect, type ReactNode } from "react";
 import axios from "axios";
+import { v4 as uuidv4 } from "uuid";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
 import { Activity, DollarSign, PieChart as PieChartIcon, TrendingUp, Plus, Trash2, Award, AlertTriangle, Calendar } from "lucide-react";
 import ParticleBackground from "@/components/ParticleBackground";
+import { supabase } from "@/lib/supabaseClient";
 
 interface HoldingInput {
   ticker: string;
@@ -49,21 +51,143 @@ interface PortfolioMetrics {
 const COLORS =["#38bdf8", "#c084fc", "#34d399", "#fbbf24", "#f87171", "#818cf8", "#e879f9", "#34d399"];
 
 export default function Dashboard() {
-  const [holdings, setHoldings] = useState<HoldingInput[]>([
-    { ticker: "AAPL", reference: "Apple (Main)", shares: 10, avg_price: 150, purchase_date: "2023-01-15" },
-    { ticker: "TSLA", reference: "TSLA", shares: 5, avg_price: 180, purchase_date: "2023-06-20" },
-    { ticker: "NVDA", reference: "NVDA", shares: 8, avg_price: 400, purchase_date: "2023-11-01" },
-  ]);
+  const [clientId, setClientId] = useState<string | null>(null);
+  const [holdings, setHoldings] = useState<HoldingInput[]>([]);
 
   const [metrics, setMetrics] = useState<PortfolioMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [loadingHoldings, setLoadingHoldings] = useState(true);
 
   const [newTicker, setNewTicker] = useState("");
   const[newReference, setNewReference] = useState("");
   const [newShares, setNewShares] = useState("");
   const [newPrice, setNewPrice] = useState("");
   const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Ensure each browser has a stable client id
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("hp_portfolio_client_id");
+    if (stored) {
+      setClientId(stored);
+      return;
+    }
+    const id = uuidv4();
+    window.localStorage.setItem("hp_portfolio_client_id", id);
+    setClientId(id);
+  }, []);
+
+  // Load holdings from Supabase (or seed defaults) once we know clientId
+  useEffect(() => {
+    if (!clientId || !supabase) return;
+    let cancelled = false;
+
+    const load = async () => {
+      if (!supabase) {
+        // No persistence configured: keep using in-memory defaults.
+        setHoldings([
+          { ticker: "AAPL", reference: "Apple (Main)", shares: 10, avg_price: 150, purchase_date: "2023-01-15" },
+          { ticker: "TSLA", reference: "TSLA", shares: 5, avg_price: 180, purchase_date: "2023-06-20" },
+          { ticker: "NVDA", reference: "NVDA", shares: 8, avg_price: 400, purchase_date: "2023-11-01" },
+        ]);
+        setLoadingHoldings(false);
+        return;
+      }
+      setLoadingHoldings(true);
+      const { data, error } = await supabase
+        .from("holdings")
+        .select("*")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: true });
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Failed to load holdings from Supabase", error);
+        // Fall back to in-memory defaults so the UI is still usable
+        const defaults: HoldingInput[] = [
+          { ticker: "AAPL", reference: "Apple (Main)", shares: 10, avg_price: 150, purchase_date: "2023-01-15" },
+          { ticker: "TSLA", reference: "TSLA", shares: 5, avg_price: 180, purchase_date: "2023-06-20" },
+          { ticker: "NVDA", reference: "NVDA", shares: 8, avg_price: 400, purchase_date: "2023-11-01" },
+        ];
+        setHoldings(defaults);
+        setLoadingHoldings(false);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        const defaults: HoldingInput[] = [
+          { ticker: "AAPL", reference: "Apple (Main)", shares: 10, avg_price: 150, purchase_date: "2023-01-15" },
+          { ticker: "TSLA", reference: "TSLA", shares: 5, avg_price: 180, purchase_date: "2023-06-20" },
+          { ticker: "NVDA", reference: "NVDA", shares: 8, avg_price: 400, purchase_date: "2023-11-01" },
+        ];
+        setHoldings(defaults);
+        await supabase.from("holdings").insert(
+          defaults.map((h) => ({
+            client_id: clientId,
+            ticker: h.ticker,
+            reference: h.reference,
+            shares: h.shares,
+            avg_price: h.avg_price,
+            purchase_date: h.purchase_date,
+          })),
+        );
+      } else {
+        setHoldings(
+          data.map((row: any) => ({
+            ticker: row.ticker,
+            reference: row.reference,
+            shares: row.shares,
+            avg_price: row.avg_price,
+            purchase_date: row.purchase_date,
+          })),
+        );
+      }
+
+      setLoadingHoldings(false);
+    };
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  // Persist holdings to Supabase whenever they change
+  useEffect(() => {
+    if (!clientId || !supabase) return;
+    if (loadingHoldings) return; // avoid immediately overwriting while first loading
+
+    const sync = async () => {
+      if (!supabase) return;
+      const { error } = await supabase
+        .from("holdings")
+        .delete()
+        .eq("client_id", clientId);
+      if (error) {
+        console.error("Failed to clear holdings before sync", error);
+        return;
+      }
+      if (holdings.length === 0) return;
+      const { error: insertError } = await supabase.from("holdings").insert(
+        holdings.map((h) => ({
+          client_id: clientId,
+          ticker: h.ticker,
+          reference: h.reference,
+          shares: h.shares,
+          avg_price: h.avg_price,
+          purchase_date: h.purchase_date,
+        })),
+      );
+      if (insertError) {
+        console.error("Failed to persist holdings to Supabase", insertError);
+      }
+    };
+
+    void sync();
+  }, [clientId, holdings, loadingHoldings]);
 
   const fetchMetrics = async () => {
     if (holdings.length === 0) {
@@ -88,6 +212,7 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
+    if (!holdings.length) return;
     fetchMetrics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [holdings]);
