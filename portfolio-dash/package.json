@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
+    "dev:api": "python -m uvicorn main:app --reload --port 8000",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -19,8 +20,7 @@
     "next": "16.2.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "recharts": "^3.8.1",
-    "yahoo-finance2": "^3.14.0"
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
