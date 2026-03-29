@@ -1,0 +1,25 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE
+.idea/
+
+# Next.js app (portfolio-dash)
+portfolio-dash/node_modules/
+portfolio-dash/.next/
+portfolio-dash/out/
+portfolio-dash/build/
+portfolio-dash/.vercel/
+portfolio-dash/.pnp.*
+portfolio-dash/coverage/
+portfolio-dash/*.tsbuildinfo
+portfolio-dash/next-env.d.ts
+portfolio-dash/npm-debug.log*
+portfolio-dash/yarn-debug.log*
+portfolio-dash/yarn-error.log*
+portfolio-dash/.pnpm-debug.log*
+portfolio-dash/.env*
