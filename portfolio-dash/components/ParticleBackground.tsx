@@ -1,7 +1,11 @@
 // components/ParticleBackground.tsx
 "use client";
 <<<<<<< HEAD
+<<<<<<< HEAD
 import { useEffect, useState, memo } from "react";
+=======
+import { useEffect, useState } from "react";
+>>>>>>> parent of ee9443c (particle simulation fixed)
 =======
 import { useEffect, useState } from "react";
 >>>>>>> parent of ee9443c (particle simulation fixed)
