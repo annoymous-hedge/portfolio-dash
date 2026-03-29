@@ -282,41 +282,11 @@ export default function Dashboard() {
     setHoldings(holdings.filter((_, index) => index !== indexToRemove));
   };
 
-  const pieData =
-    metrics?.holdings ||
-    holdings.map((h) => ({
-      reference: h.reference,
-      market_value: h.shares * h.avg_price,
-    }));
-
-  const renderAllocationLabel = (props: any) => {
-    const { cx, cy, midAngle, innerRadius, outerRadius, percent, index } = props;
-    const radius = outerRadius + 18;
-    const radian = Math.PI / 180;
-    const x = cx + radius * Math.cos(-midAngle * radian);
-    const y = cy + radius * Math.sin(-midAngle * radian);
-
-    const item = pieData[index] as any;
-    const baseColor =
-      metrics && metrics.holdings[index]
-        ? metrics.holdings[index].pnl_percent >= 0
-          ? "#4ade80" // green for positive
-          : "#f97373" // red for negative
-        : COLORS[index % COLORS.length];
-
-    return (
-      <text
-        x={x}
-        y={y}
-        fill={baseColor}
-        textAnchor={x > cx ? "start" : "end"}
-        dominantBaseline="central"
-        className="text-[10px] font-medium tracking-wider"
-      >
-        {`${item.reference} ${((percent ?? 0) * 100).toFixed(1)}%`}
-      </text>
-    );
-  };
+  const pieData = metrics?.holdings || holdings.map(h => ({
+    reference: h.reference,
+    market_value: h.shares * h.avg_price
+  }));
+  const pieTotal = pieData.reduce((sum, item) => sum + Number(item.market_value || 0), 0);
 
   return (
     <main className="min-h-screen text-slate-300 font-sans p-4 md:p-8 relative selection:bg-cyan-500/30">
@@ -440,8 +410,12 @@ export default function Dashboard() {
                       <td className="py-3 text-right text-slate-300 tabular-nums">{live && h != null && h.weight_percent != null ? `${h.weight_percent.toFixed(2)}%` : "—"}</td>
                       <td className="py-3 text-slate-400 text-sm">{holding.purchase_date}</td>
                       <td className="py-3 text-slate-300">{holding.shares}</td>
-                      <td className="py-3 text-slate-300">{currencySymbol}{holding.avg_price.toFixed(2)}</td>
-                      <td className="py-3 text-cyan-200 font-medium">{live ? `${currencySymbol}${h!.current_price.toFixed(2)}` : <span className="text-slate-500">—</span>}</td>
+                      <td className="py-3 text-slate-300">
+                        {live ? `${h!.avg_price.toFixed(2)} ${h!.quote_currency}` : `${holding.avg_price.toFixed(2)}`}
+                      </td>
+                      <td className="py-3 text-cyan-200 font-medium">
+                        {live ? `${h!.current_price.toFixed(2)} ${h!.quote_currency}` : <span className="text-slate-500">—</span>}
+                      </td>
 
                       <td className={`py-3 text-right font-medium tabular-nums ${live ? (h!.daily_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
                         {live ? `${h!.daily_return_percent > 0 ? '+' : ''}${h!.daily_return_percent.toFixed(2)}%` : "—"}
@@ -521,7 +495,7 @@ export default function Dashboard() {
             {/* Asset Allocation */}
             <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-xl p-6 shadow-2xl">
               <h2 className="text-sm font-semibold mb-4 text-cyan-100 uppercase tracking-wider">Allocation</h2>
-              <div className="h-[250px]">
+              <div className="h-[250px] -ml-4">
                 {holdings.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -535,8 +509,9 @@ export default function Dashboard() {
                         outerRadius={65}
                         paddingAngle={3}
                         stroke="none"
-                        label={renderAllocationLabel}
-                        labelLine={false}
+                        label={false}
+                        labelLine={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 1 }}
+                        className="text-[10px] fill-slate-200 font-medium tracking-wider"
                       >
                         {pieData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -555,6 +530,24 @@ export default function Dashboard() {
                   <div className="flex items-center justify-center h-full text-slate-500 text-sm">Awaiting Data</div>
                 )}
               </div>
+              {pieData.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  {pieData.map((entry, index) => (
+                    <div key={`alloc-${entry.reference}-${index}`} className="flex items-center justify-between text-xs">
+                      <span className="flex items-center gap-2 text-slate-300">
+                        <span
+                          className="inline-block w-2 h-2 rounded-full"
+                          style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                        />
+                        {entry.reference}
+                      </span>
+                      <span className="text-cyan-300 tabular-nums">
+                        {pieTotal > 0 ? `${((Number(entry.market_value) / pieTotal) * 100).toFixed(1)}%` : "0.0%"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
           </div>
@@ -582,10 +575,13 @@ function KPICard({
   glow?: string;
 }) {
   let subtitleColorClass = "bg-white/10 text-slate-300";
+  let valueColorClass = "text-white";
   if (!subtitlePlain) {
     if (isPositive === true) subtitleColorClass = "bg-emerald-500/20 text-emerald-400";
     if (isPositive === false) subtitleColorClass = "bg-red-500/20 text-red-400";
   }
+  if (isPositive === true) valueColorClass = "text-emerald-400";
+  if (isPositive === false) valueColorClass = "text-red-400";
 
   return (
     <div
@@ -597,7 +593,7 @@ function KPICard({
       </div>
       <h3 className="text-slate-400 text-xs font-semibold tracking-wider uppercase">{title}</h3>
       <div className="mt-3 flex items-baseline space-x-2">
-        <span className="text-2xl font-bold text-white tracking-tight">{value}</span>
+        <span className={`text-2xl font-bold tracking-tight ${valueColorClass}`}>{value}</span>
         {subtitle && (
           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${subtitleColorClass}`}>
             {!subtitlePlain && isPositive && subtitle !== "0%" ? "+" : ""}
