@@ -1,18 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["iad1"],
-  "installCommand": "npm install && python -m pip install -r requirements.txt",
-  "experimentalServices": {
-    "web": {
-      "entrypoint": ".",
-      "routePrefix": "/",
-      "framework": "nextjs"
-    },
-    "backend": {
-      "entrypoint": "main.py",
-      "routePrefix": "/api",
-      "framework": "fastapi",
-      "maxDuration": 60
-    }
-  }
+  "framework": "nextjs",
+  "regions": ["iad1"]
 }

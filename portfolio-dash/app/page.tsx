@@ -224,7 +224,7 @@ export default function Dashboard() {
             <h2 className="text-sm font-semibold mb-6 uppercase tracking-wider text-cyan-100 flex items-center">
               <span className="w-2 h-2 rounded-full bg-cyan-500 mr-3 shadow-[0_0_10px_rgba(56,189,248,0.8)]"></span> Ledger Overview
             </h2>
-            {/* {fetchError && (
+            {fetchError && (
               <p className="mb-4 text-xs text-amber-400/95 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
                 Market data unavailable: {fetchError}. Showing positions only. For local dev, run{" "}
                 <code className="text-cyan-300/90">npm run dev:api</code> in another terminal and start{" "}
@@ -232,7 +232,7 @@ export default function Dashboard() {
                 <code className="text-cyan-300/90">/api/portfolio</code> can proxy to FastAPI (or use{" "}
                 <code className="text-cyan-300/90">vercel dev</code>).
               </p>
-            )} */}
+            )}
             <div className="overflow-x-auto flex-1">
               <table className="w-full text-left border-collapse whitespace-nowrap">
                 <thead>
