@@ -226,9 +226,11 @@ export default function Dashboard() {
             </h2>
             {fetchError && (
               <p className="mb-4 text-xs text-amber-400/95 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-                Market data unavailable: {fetchError}. Showing positions only — run{" "}
-                <code className="text-cyan-300/90">npm run dev:api</code> in another terminal (or{" "}
-                <code className="text-cyan-300/90">vercel dev</code>) so <code className="text-cyan-300/90">/api/portfolio</code> can respond.
+                Market data unavailable: {fetchError}. Showing positions only. For local dev, run{" "}
+                <code className="text-cyan-300/90">npm run dev:api</code> in another terminal and start{" "}
+                <code className="text-cyan-300/90">next dev</code> with <code className="text-cyan-300/90">USE_PYTHON_API=1</code> so{" "}
+                <code className="text-cyan-300/90">/api/portfolio</code> can proxy to FastAPI (or use{" "}
+                <code className="text-cyan-300/90">vercel dev</code>).
               </p>
             )}
             <div className="overflow-x-auto flex-1">

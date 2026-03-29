@@ -1,6 +1,6 @@
 // components/ParticleBackground.tsx
 "use client";
-import { useEffect, useMemo, useState, memo } from "react";
+import { useEffect, useState, memo } from "react";
 import Particles, { initParticlesEngine } from "@tsparticles/react";
 import { loadSlim } from "@tsparticles/slim";
 import type { ISourceOptions } from "@tsparticles/engine";
