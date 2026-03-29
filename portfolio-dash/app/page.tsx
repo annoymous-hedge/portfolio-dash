@@ -57,6 +57,7 @@ export default function Dashboard() {
 
   const [metrics, setMetrics] = useState<PortfolioMetrics | null>(null);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [newTicker, setNewTicker] = useState("");
   const[newReference, setNewReference] = useState("");
@@ -67,14 +68,21 @@ export default function Dashboard() {
   const fetchMetrics = async () => {
     if (holdings.length === 0) {
       setMetrics(null);
+      setFetchError(null);
       return;
     }
     setLoading(true);
+    setFetchError(null);
     try {
       const response = await axios.post("/api/portfolio", holdings);
       setMetrics(response.data);
     } catch (error) {
       console.error("Failed to fetch metrics", error);
+      setMetrics(null);
+      const msg = axios.isAxiosError(error)
+        ? `${error.message}${error.response?.status ? ` (${error.response.status})` : ""}`
+        : "Could not reach /api/portfolio. Is the FastAPI backend running?";
+      setFetchError(msg);
     }
     setLoading(false);
   };
@@ -160,7 +168,7 @@ export default function Dashboard() {
             </div>
             <div>
               <h1 className="text-2xl font-semibold text-white tracking-wide">
-                Terminal<span className="text-cyan-500">_Portfolio</span>
+                HP<span className="text-cyan-500">_Portfolio</span>
               </h1>
               <p className="text-slate-400 text-xs uppercase tracking-wider mt-1">System Metrics Live</p>
             </div>
@@ -216,6 +224,13 @@ export default function Dashboard() {
             <h2 className="text-sm font-semibold mb-6 uppercase tracking-wider text-cyan-100 flex items-center">
               <span className="w-2 h-2 rounded-full bg-cyan-500 mr-3 shadow-[0_0_10px_rgba(56,189,248,0.8)]"></span> Ledger Overview
             </h2>
+            {fetchError && (
+              <p className="mb-4 text-xs text-amber-400/95 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                Market data unavailable: {fetchError}. Showing positions only — run{" "}
+                <code className="text-cyan-300/90">npm run dev:api</code> in another terminal (or{" "}
+                <code className="text-cyan-300/90">vercel dev</code>) so <code className="text-cyan-300/90">/api/portfolio</code> can respond.
+              </p>
+            )}
             <div className="overflow-x-auto flex-1">
               <table className="w-full text-left border-collapse whitespace-nowrap">
                 <thead>
@@ -235,32 +250,35 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {metrics?.holdings.map((h, i) => (
-                    <tr key={i} className="border-b border-white/5 hover:bg-white/[0.03] transition-colors">
+                  {holdings.map((holding, i) => {
+                    const h = metrics?.holdings[i];
+                    const live = Boolean(h);
+                    return (
+                    <tr key={`${holding.reference}-${i}`} className="border-b border-white/5 hover:bg-white/[0.03] transition-colors">
                       <td className="py-3 pl-2">
-                        <div className="font-bold text-white">{h.reference}</div>
-                        {h.reference !== h.ticker && <div className="text-[10px] text-cyan-400 uppercase tracking-wider mt-0.5">{h.ticker}</div>}
+                        <div className="font-bold text-white">{holding.reference}</div>
+                        {holding.reference !== holding.ticker && <div className="text-[10px] text-cyan-400 uppercase tracking-wider mt-0.5">{holding.ticker}</div>}
                       </td>
-                      <td className="py-3 text-right text-slate-300 tabular-nums">{h.weight_percent?.toFixed(2) ?? "—"}%</td>
-                      <td className="py-3 text-slate-400 text-sm">{h.purchase_date}</td>
-                      <td className="py-3 text-slate-300">{h.shares}</td>
-                      <td className="py-3 text-slate-300">${h.avg_price.toFixed(2)}</td>
-                      <td className="py-3 text-cyan-200 font-medium">${h.current_price.toFixed(2)}</td>
+                      <td className="py-3 text-right text-slate-300 tabular-nums">{live && h != null && h.weight_percent != null ? `${h.weight_percent.toFixed(2)}%` : "—"}</td>
+                      <td className="py-3 text-slate-400 text-sm">{holding.purchase_date}</td>
+                      <td className="py-3 text-slate-300">{holding.shares}</td>
+                      <td className="py-3 text-slate-300">${holding.avg_price.toFixed(2)}</td>
+                      <td className="py-3 text-cyan-200 font-medium">{live ? `$${h!.current_price.toFixed(2)}` : <span className="text-slate-500">—</span>}</td>
 
-                      <td className={`py-3 text-right font-medium tabular-nums ${h.daily_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {h.daily_return_percent > 0 ? '+' : ''}{h.daily_return_percent?.toFixed(2) ?? "—"}%
+                      <td className={`py-3 text-right font-medium tabular-nums ${live ? (h!.daily_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
+                        {live ? `${h!.daily_return_percent > 0 ? '+' : ''}${h!.daily_return_percent.toFixed(2)}%` : "—"}
                       </td>
-                      <td className={`py-3 text-right tabular-nums text-slate-300 ${(h.weight_contribution_daily_percent ?? 0) >= 0 ? '' : 'text-red-400/90'}`}>
-                        {(h.weight_contribution_daily_percent ?? 0) > 0 ? '+' : ''}{h.weight_contribution_daily_percent?.toFixed(3) ?? "—"}%
+                      <td className={`py-3 text-right tabular-nums ${live ? 'text-slate-300' : 'text-slate-500'} ${live && (h!.weight_contribution_daily_percent ?? 0) < 0 ? 'text-red-400/90' : ''}`}>
+                        {live ? `${(h!.weight_contribution_daily_percent ?? 0) > 0 ? '+' : ''}${h!.weight_contribution_daily_percent?.toFixed(3)}%` : "—"}
                       </td>
-                      <td className={`py-3 text-right font-medium ${h.pnl_percent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {h.pnl_percent > 0 ? '+' : ''}{h.pnl_percent}%
+                      <td className={`py-3 text-right font-medium ${live ? (h!.pnl_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
+                        {live ? `${h!.pnl_percent > 0 ? '+' : ''}${h!.pnl_percent}%` : "—"}
                       </td>
-                      <td className={`py-3 text-right font-medium ${h.ann_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {h.ann_return_percent > 0 ? '+' : ''}{h.ann_return_percent}%
+                      <td className={`py-3 text-right font-medium ${live ? (h!.ann_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
+                        {live ? `${h!.ann_return_percent > 0 ? '+' : ''}${h!.ann_return_percent}%` : "—"}
                       </td>
-                      <td className={`py-3 text-right ${h.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        ${h.pnl.toLocaleString()}
+                      <td className={`py-3 text-right ${live ? (h!.pnl >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
+                        {live ? `$${h!.pnl.toLocaleString()}` : "—"}
                       </td>
 
                       <td className="py-3 text-center">
@@ -272,7 +290,8 @@ export default function Dashboard() {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
