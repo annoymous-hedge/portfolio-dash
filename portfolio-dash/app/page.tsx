@@ -31,9 +31,13 @@ interface PortfolioMetrics {
     ann_return_percent: number;
     daily_pnl: number;
     daily_return_percent: number;
+    quote_currency: string;
+    fx_rate_to_display: number;
+    display_currency: "USD" | "MYR";
     weight_percent: number;
     weight_contribution_daily_percent: number;
   }[];
+  display_currency: "USD" | "MYR";
   total_value: number;
   total_cost: number;
   total_pnl: number;
@@ -58,12 +62,14 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [loadingHoldings, setLoadingHoldings] = useState(true);
+  const [displayCurrency, setDisplayCurrency] = useState<"USD" | "MYR">("USD");
 
   const [newTicker, setNewTicker] = useState("");
   const[newReference, setNewReference] = useState("");
   const [newShares, setNewShares] = useState("");
   const [newPrice, setNewPrice] = useState("");
   const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
+  const currencySymbol = displayCurrency === "MYR" ? "RM" : "$";
 
   // Ensure each browser has a stable client id
   useEffect(() => {
@@ -80,7 +86,7 @@ export default function Dashboard() {
 
   // Load holdings from Supabase (or seed defaults) once we know clientId
   useEffect(() => {
-    if (!clientId || !supabase) return;
+    if (!clientId) return;
     let cancelled = false;
 
     const load = async () => {
@@ -198,7 +204,10 @@ export default function Dashboard() {
     setLoading(true);
     setFetchError(null);
     try {
-      const response = await axios.post("/api/portfolio", holdings);
+      const response = await axios.post("/api/portfolio", {
+        holdings,
+        display_currency: displayCurrency,
+      });
       setMetrics(response.data);
     } catch (error) {
       console.error("Failed to fetch metrics", error);
@@ -215,7 +224,7 @@ export default function Dashboard() {
     if (!holdings.length) return;
     fetchMetrics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [holdings]);
+  }, [holdings, displayCurrency]);
 
   const addTransaction = (e: React.FormEvent) => {
     e.preventDefault();
@@ -298,19 +307,29 @@ export default function Dashboard() {
               <p className="text-slate-400 text-xs uppercase tracking-wider mt-1">System Metrics Live</p>
             </div>
           </div>
-          <button
-            onClick={fetchMetrics}
-            className="mt-4 md:mt-0 px-6 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors text-sm font-medium flex items-center space-x-2 text-white"
-          >
-            {loading ? <span className="animate-pulse text-cyan-400">Syncing...</span> : <span>Fetch Market Data</span>}
-          </button>
+          <div className="mt-4 md:mt-0 flex items-center gap-3">
+            <select
+              value={displayCurrency}
+              onChange={(e) => setDisplayCurrency(e.target.value as "USD" | "MYR")}
+              className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm font-medium text-white outline-none"
+            >
+              <option value="USD">USD</option>
+              <option value="MYR">MYR</option>
+            </select>
+            <button
+              onClick={fetchMetrics}
+              className="px-6 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors text-sm font-medium flex items-center space-x-2 text-white"
+            >
+              {loading ? <span className="animate-pulse text-cyan-400">Syncing...</span> : <span>Fetch Market Data</span>}
+            </button>
+          </div>
         </header>
 
         {/* Top KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          <KPICard title="Total Portfolio Value" value={`$${metrics?.total_value.toLocaleString() || "0.00"}`} icon={<DollarSign />} glow="rgba(56,189,248,0.15)" />
-          <KPICard title="All-Time Profit / Loss" value={`$${metrics?.total_pnl.toLocaleString() || "0.00"}`} subtitle={`${metrics?.total_pnl_percent || 0}%`} icon={<TrendingUp />} isPositive={metrics ? metrics.total_pnl >= 0 : undefined} glow={metrics && metrics.total_pnl >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"} />
-          <KPICard title="Today's Daily P/L" value={`$${metrics?.total_daily_pnl.toLocaleString() || "0.00"}`} icon={<Calendar />} isPositive={metrics ? metrics.total_daily_pnl >= 0 : undefined} glow={metrics && metrics.total_daily_pnl >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"} />
+          <KPICard title={`Total Portfolio Value (${displayCurrency})`} value={`${currencySymbol}${metrics?.total_value.toLocaleString() || "0.00"}`} icon={<DollarSign />} glow="rgba(56,189,248,0.15)" />
+          <KPICard title={`All-Time Profit / Loss (${displayCurrency})`} value={`${currencySymbol}${metrics?.total_pnl.toLocaleString() || "0.00"}`} subtitle={`${metrics?.total_pnl_percent || 0}%`} icon={<TrendingUp />} isPositive={metrics ? metrics.total_pnl >= 0 : undefined} glow={metrics && metrics.total_pnl >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"} />
+          <KPICard title={`Today's Daily P/L (${displayCurrency})`} value={`${currencySymbol}${metrics?.total_daily_pnl.toLocaleString() || "0.00"}`} icon={<Calendar />} isPositive={metrics ? metrics.total_daily_pnl >= 0 : undefined} glow={metrics && metrics.total_daily_pnl >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"} />
           <KPICard
             title="Portfolio Daily Return (weighted)"
             value={`${metrics?.portfolio_daily_return_percent != null ? (metrics.portfolio_daily_return_percent > 0 ? "+" : "") + metrics.portfolio_daily_return_percent : "0"}%`}
@@ -372,7 +391,8 @@ export default function Dashboard() {
                     <th className="pb-4 text-right font-medium">Contrib 1d</th>
                     <th className="pb-4 text-right font-medium">Return %</th>
                     <th className="pb-4 text-right font-medium">Ann. Return</th>
-                    <th className="pb-4 text-right font-medium">Total P/L</th>
+                    <th className="pb-4 text-right font-medium">Value ({displayCurrency})</th>
+                    <th className="pb-4 text-right font-medium">Total P/L ({displayCurrency})</th>
                     <th className="pb-4 text-center font-medium">Drop</th>
                   </tr>
                 </thead>
@@ -389,8 +409,8 @@ export default function Dashboard() {
                       <td className="py-3 text-right text-slate-300 tabular-nums">{live && h != null && h.weight_percent != null ? `${h.weight_percent.toFixed(2)}%` : "—"}</td>
                       <td className="py-3 text-slate-400 text-sm">{holding.purchase_date}</td>
                       <td className="py-3 text-slate-300">{holding.shares}</td>
-                      <td className="py-3 text-slate-300">${holding.avg_price.toFixed(2)}</td>
-                      <td className="py-3 text-cyan-200 font-medium">{live ? `$${h!.current_price.toFixed(2)}` : <span className="text-slate-500">—</span>}</td>
+                      <td className="py-3 text-slate-300">{currencySymbol}{holding.avg_price.toFixed(2)}</td>
+                      <td className="py-3 text-cyan-200 font-medium">{live ? `${currencySymbol}${h!.current_price.toFixed(2)}` : <span className="text-slate-500">—</span>}</td>
 
                       <td className={`py-3 text-right font-medium tabular-nums ${live ? (h!.daily_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
                         {live ? `${h!.daily_return_percent > 0 ? '+' : ''}${h!.daily_return_percent.toFixed(2)}%` : "—"}
@@ -404,8 +424,11 @@ export default function Dashboard() {
                       <td className={`py-3 text-right font-medium ${live ? (h!.ann_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
                         {live ? `${h!.ann_return_percent > 0 ? '+' : ''}${h!.ann_return_percent}%` : "—"}
                       </td>
+                      <td className="py-3 text-right text-slate-300">
+                        {live ? `${currencySymbol}${h!.market_value.toLocaleString()}` : "—"}
+                      </td>
                       <td className={`py-3 text-right ${live ? (h!.pnl >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
-                        {live ? `$${h!.pnl.toLocaleString()}` : "—"}
+                        {live ? `${currencySymbol}${h!.pnl.toLocaleString()}` : "—"}
                       </td>
 
                       <td className="py-3 text-center">
@@ -493,7 +516,7 @@ export default function Dashboard() {
                         contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '12px', backdropFilter: 'blur(10px)' }}
                         itemStyle={{ color: '#f8fafc' }}
                         formatter={(value) =>
-                          `$${Number(value ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          `${currencySymbol}${Number(value ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                         }
                       />
                     </PieChart>
