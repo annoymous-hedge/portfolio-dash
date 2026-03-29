@@ -5,7 +5,7 @@ import { useState, useEffect, type ReactNode } from "react";
 import axios from "axios";
 import { v4 as uuidv4 } from "uuid";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
-import { Activity, DollarSign, PieChart as PieChartIcon, TrendingUp, Plus, Trash2, Award, AlertTriangle, Calendar, ArrowUpRight, ArrowDownRight, Minus } from "lucide-react";
+import { Activity, DollarSign, PieChart as PieChartIcon, TrendingUp, Plus, Trash2, Award, AlertTriangle, Calendar } from "lucide-react";
 import ParticleBackground from "@/components/ParticleBackground";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -282,10 +282,41 @@ export default function Dashboard() {
     setHoldings(holdings.filter((_, index) => index !== indexToRemove));
   };
 
-  const pieData = metrics?.holdings || holdings.map(h => ({
-    reference: h.reference,
-    market_value: h.shares * h.avg_price
-  }));
+  const pieData =
+    metrics?.holdings ||
+    holdings.map((h) => ({
+      reference: h.reference,
+      market_value: h.shares * h.avg_price,
+    }));
+
+  const renderAllocationLabel = (props: any) => {
+    const { cx, cy, midAngle, innerRadius, outerRadius, percent, index } = props;
+    const radius = outerRadius + 18;
+    const radian = Math.PI / 180;
+    const x = cx + radius * Math.cos(-midAngle * radian);
+    const y = cy + radius * Math.sin(-midAngle * radian);
+
+    const item = pieData[index] as any;
+    const baseColor =
+      metrics && metrics.holdings[index]
+        ? metrics.holdings[index].pnl_percent >= 0
+          ? "#4ade80" // green for positive
+          : "#f97373" // red for negative
+        : COLORS[index % COLORS.length];
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill={baseColor}
+        textAnchor={x > cx ? "start" : "end"}
+        dominantBaseline="central"
+        className="text-[10px] font-medium tracking-wider"
+      >
+        {`${item.reference} ${((percent ?? 0) * 100).toFixed(1)}%`}
+      </text>
+    );
+  };
 
   return (
     <main className="min-h-screen text-slate-300 font-sans p-4 md:p-8 relative selection:bg-cyan-500/30">
@@ -328,24 +359,8 @@ export default function Dashboard() {
         {/* Top KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           <KPICard title={`Total Portfolio Value (${displayCurrency})`} value={`${currencySymbol}${metrics?.total_value.toLocaleString() || "0.00"}`} icon={<DollarSign />} glow="rgba(56,189,248,0.15)" />
-          <KPICard
-            title={`All-Time Profit / Loss (${displayCurrency})`}
-            value={`${currencySymbol}${metrics?.total_pnl.toLocaleString() || "0.00"}`}
-            subtitle={`${metrics?.total_pnl_percent || 0}%`}
-            icon={<TrendingUp />}
-            isPositive={metrics ? metrics.total_pnl >= 0 : undefined}
-            emphasizeValueBySign
-            sparklineData={metrics ? [metrics.total_cost, metrics.total_value] : undefined}
-            glow={metrics && metrics.total_pnl >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}
-          />
-          <KPICard
-            title={`Today's Daily P/L (${displayCurrency})`}
-            value={`${currencySymbol}${metrics?.total_daily_pnl.toLocaleString() || "0.00"}`}
-            icon={<Calendar />}
-            isPositive={metrics ? metrics.total_daily_pnl >= 0 : undefined}
-            emphasizeValueBySign
-            glow={metrics && metrics.total_daily_pnl >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}
-          />
+          <KPICard title={`All-Time Profit / Loss (${displayCurrency})`} value={`${currencySymbol}${metrics?.total_pnl.toLocaleString() || "0.00"}`} subtitle={`${metrics?.total_pnl_percent || 0}%`} icon={<TrendingUp />} isPositive={metrics ? metrics.total_pnl >= 0 : undefined} glow={metrics && metrics.total_pnl >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"} />
+          <KPICard title={`Today's Daily P/L (${displayCurrency})`} value={`${currencySymbol}${metrics?.total_daily_pnl.toLocaleString() || "0.00"}`} icon={<Calendar />} isPositive={metrics ? metrics.total_daily_pnl >= 0 : undefined} glow={metrics && metrics.total_daily_pnl >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"} />
           <KPICard
             title="Portfolio Daily Return (weighted)"
             value={`${metrics?.portfolio_daily_return_percent != null ? (metrics.portfolio_daily_return_percent > 0 ? "+" : "") + metrics.portfolio_daily_return_percent : "0"}%`}
@@ -353,7 +368,6 @@ export default function Dashboard() {
             subtitlePlain
             icon={<Activity />}
             isPositive={metrics ? metrics.portfolio_daily_return_percent >= 0 : undefined}
-            emphasizeValueBySign
             glow={metrics && metrics.portfolio_daily_return_percent >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}
           />
           <KPICard
@@ -363,7 +377,6 @@ export default function Dashboard() {
             subtitlePlain
             icon={<TrendingUp />}
             isPositive={metrics ? metrics.portfolio_weighted_ann_return_percent >= 0 : undefined}
-            emphasizeValueBySign
             glow={metrics && metrics.portfolio_weighted_ann_return_percent >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}
           />
           <KPICard
@@ -373,7 +386,6 @@ export default function Dashboard() {
             subtitlePlain
             icon={<TrendingUp />}
             isPositive={metrics ? metrics.portfolio_weighted_total_return_percent >= 0 : undefined}
-            emphasizeValueBySign
             glow={metrics && metrics.portfolio_weighted_total_return_percent >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}
           />
           <KPICard title="Active Assets" value={holdings.length.toString()} icon={<PieChartIcon />} glow="rgba(192,132,252,0.15)" />
@@ -509,7 +521,7 @@ export default function Dashboard() {
             {/* Asset Allocation */}
             <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-xl p-6 shadow-2xl">
               <h2 className="text-sm font-semibold mb-4 text-cyan-100 uppercase tracking-wider">Allocation</h2>
-              <div className="h-[250px] -ml-4">
+              <div className="h-[250px]">
                 {holdings.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -523,9 +535,8 @@ export default function Dashboard() {
                         outerRadius={65}
                         paddingAngle={3}
                         stroke="none"
-                        label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(1)}%`}
-                        labelLine={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 1 }}
-                        className="text-[10px] fill-slate-200 font-medium tracking-wider"
+                        label={renderAllocationLabel}
+                        labelLine={false}
                       >
                         {pieData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -558,8 +569,6 @@ function KPICard({
   value,
   subtitle,
   subtitlePlain,
-  emphasizeValueBySign,
-  sparklineData,
   icon,
   isPositive,
   glow,
@@ -568,8 +577,6 @@ function KPICard({
   value: string;
   subtitle?: string;
   subtitlePlain?: boolean;
-  emphasizeValueBySign?: boolean;
-  sparklineData?: number[];
   icon: ReactNode;
   isPositive?: boolean;
   glow?: string;
@@ -578,11 +585,6 @@ function KPICard({
   if (!subtitlePlain) {
     if (isPositive === true) subtitleColorClass = "bg-emerald-500/20 text-emerald-400";
     if (isPositive === false) subtitleColorClass = "bg-red-500/20 text-red-400";
-  }
-  let valueColorClass = "text-white";
-  if (emphasizeValueBySign) {
-    if (isPositive === true) valueColorClass = "text-emerald-400";
-    if (isPositive === false) valueColorClass = "text-red-400";
   }
 
   return (
@@ -594,15 +596,8 @@ function KPICard({
         <div className="w-8 h-8 flex items-center justify-center">{icon}</div>
       </div>
       <h3 className="text-slate-400 text-xs font-semibold tracking-wider uppercase">{title}</h3>
-      <div className="mt-3 flex items-baseline justify-between gap-2">
-        <div className="flex items-baseline space-x-2">
-          <span className={`text-2xl font-bold tracking-tight ${valueColorClass}`}>{value}</span>
-          {emphasizeValueBySign && (
-            <span className={isPositive === true ? "text-emerald-400" : isPositive === false ? "text-red-400" : "text-slate-400"}>
-              {isPositive === true ? <ArrowUpRight className="w-4 h-4" /> : isPositive === false ? <ArrowDownRight className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
-            </span>
-          )}
-        </div>
+      <div className="mt-3 flex items-baseline space-x-2">
+        <span className="text-2xl font-bold text-white tracking-tight">{value}</span>
         {subtitle && (
           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${subtitleColorClass}`}>
             {!subtitlePlain && isPositive && subtitle !== "0%" ? "+" : ""}
@@ -610,33 +605,6 @@ function KPICard({
           </span>
         )}
       </div>
-      {sparklineData && sparklineData.length > 1 && (
-        <MiniSparkline points={sparklineData} isPositive={isPositive} />
-      )}
     </div>
-  );
-}
-
-function MiniSparkline({ points, isPositive }: { points: number[]; isPositive?: boolean }) {
-  const width = 86;
-  const height = 22;
-  const max = Math.max(...points);
-  const min = Math.min(...points);
-  const range = max - min || 1;
-  const step = points.length > 1 ? width / (points.length - 1) : width;
-  const svgPoints = points
-    .map((p, i) => {
-      const x = i * step;
-      const y = height - ((p - min) / range) * height;
-      return `${x},${y}`;
-    })
-    .join(" ");
-
-  const stroke = isPositive === true ? "#34d399" : isPositive === false ? "#f87171" : "#94a3b8";
-
-  return (
-    <svg className="mt-2" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden>
-      <polyline fill="none" stroke={stroke} strokeWidth="2" points={svgPoints} />
-    </svg>
   );
 }
