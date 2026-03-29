@@ -379,15 +379,15 @@ export default function Dashboard() {
               </p>
             )}
             <div className="overflow-x-auto flex-1">
-              <table className="w-full text-left border-collapse whitespace-nowrap">
+              <table className="w-full min-w-[1100px] text-left border-collapse whitespace-nowrap">
                 <thead>
                   <tr className="text-slate-400 border-b border-white/10 text-xs uppercase tracking-wider">
                     <th className="pb-4 pl-2 font-medium">Asset Identity</th>
-                    <th className="pb-4 text-right font-medium">Weight</th>
-                    <th className="pb-4 font-medium">Purchased</th>
-                    <th className="pb-4 font-medium">Shares</th>
-                    <th className="pb-4 font-medium">Avg Cost</th>
-                    <th className="pb-4 font-medium">Current</th>
+                    <th className="pb-4 pr-6 text-right font-medium">Weight</th>
+                    <th className="pb-4 pl-4 font-medium">Purchased</th>
+                    <th className="pb-4 pl-4 font-medium">Shares</th>
+                    <th className="pb-4 pl-4 font-medium">Avg Cost</th>
+                    <th className="pb-4 pl-4 font-medium">Current</th>
                     <th className="pb-4 text-right font-medium">1d %</th>
                     <th className="pb-4 text-right font-medium">Contrib 1d</th>
                     <th className="pb-4 text-right font-medium">Return %</th>
@@ -407,13 +407,13 @@ export default function Dashboard() {
                         <div className="font-bold text-white">{holding.reference}</div>
                         {holding.reference !== holding.ticker && <div className="text-[10px] text-cyan-400 uppercase tracking-wider mt-0.5">{holding.ticker}</div>}
                       </td>
-                      <td className="py-3 text-right text-slate-300 tabular-nums">{live && h != null && h.weight_percent != null ? `${h.weight_percent.toFixed(2)}%` : "—"}</td>
-                      <td className="py-3 text-slate-400 text-sm">{holding.purchase_date}</td>
-                      <td className="py-3 text-slate-300">{holding.shares}</td>
-                      <td className="py-3 text-slate-300">
+                      <td className="py-3 pr-6 text-right text-slate-300 tabular-nums">{live && h != null && h.weight_percent != null ? `${h.weight_percent.toFixed(2)}%` : "—"}</td>
+                      <td className="py-3 pl-4 text-slate-400 text-sm">{holding.purchase_date}</td>
+                      <td className="py-3 pl-4 text-slate-300">{holding.shares}</td>
+                      <td className="py-3 pl-4 text-slate-300">
                         {live ? `${h!.avg_price.toFixed(2)} ${h!.quote_currency}` : `${holding.avg_price.toFixed(2)}`}
                       </td>
-                      <td className="py-3 text-cyan-200 font-medium">
+                      <td className="py-3 pl-4 text-cyan-200 font-medium">
                         {live ? `${h!.current_price.toFixed(2)} ${h!.quote_currency}` : <span className="text-slate-500">—</span>}
                       </td>
 
@@ -506,10 +506,10 @@ export default function Dashboard() {
                         cx="50%"
                         cy="50%"
                         innerRadius={45}
-                        outerRadius={65}
+                        outerRadius={68}
                         paddingAngle={3}
                         stroke="none"
-                        label={false}
+                        label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(1)}%`}
                         labelLine={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 1 }}
                         className="text-[10px] fill-slate-200 font-medium tracking-wider"
                       >
