@@ -1,7 +1,7 @@
 // app/page.tsx
 "use client";
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import axios from "axios";
 import { v4 as uuidv4 } from "uuid";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
@@ -15,6 +15,7 @@ interface HoldingInput {
   shares: number;
   avg_price: number;
   purchase_date: string;
+  dividends_received: number;
 }
 
 interface PortfolioMetrics {
@@ -34,6 +35,9 @@ interface PortfolioMetrics {
     quote_currency: string;
     fx_rate_to_display: number;
     display_currency: "USD" | "MYR";
+    dividends_received: number;
+    dividends_received_display: number;
+    dividend_yield_percent: number | null;
     weight_percent: number;
     weight_contribution_daily_percent: number;
   }[];
@@ -71,6 +75,12 @@ export default function Dashboard() {
   const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
   const currencySymbol = displayCurrency === "MYR" ? "RM" : "$";
 
+  const [divRef, setDivRef] = useState("");
+  const [divAmount, setDivAmount] = useState("");
+
+  const [hoveredAssetIndex, setHoveredAssetIndex] = useState<number | null>(null);
+  const hoverTimer = useRef<number | null>(null);
+
   // Ensure each browser has a stable client id
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -93,9 +103,9 @@ export default function Dashboard() {
       if (!supabase) {
         // No persistence configured: keep using in-memory defaults.
         setHoldings([
-          { ticker: "AAPL", reference: "Apple (Main)", shares: 10, avg_price: 150, purchase_date: "2023-01-15" },
-          { ticker: "TSLA", reference: "TSLA", shares: 5, avg_price: 180, purchase_date: "2023-06-20" },
-          { ticker: "NVDA", reference: "NVDA", shares: 8, avg_price: 400, purchase_date: "2023-11-01" },
+          { ticker: "AAPL", reference: "Apple (Main)", shares: 10, avg_price: 150, purchase_date: "2023-01-15", dividends_received: 0 },
+          { ticker: "TSLA", reference: "TSLA", shares: 5, avg_price: 180, purchase_date: "2023-06-20", dividends_received: 0 },
+          { ticker: "NVDA", reference: "NVDA", shares: 8, avg_price: 400, purchase_date: "2023-11-01", dividends_received: 0 },
         ]);
         setLoadingHoldings(false);
         return;
@@ -113,9 +123,9 @@ export default function Dashboard() {
         console.error("Failed to load holdings from Supabase", error);
         // Fall back to in-memory defaults so the UI is still usable
         const defaults: HoldingInput[] = [
-          { ticker: "AAPL", reference: "Apple (Main)", shares: 10, avg_price: 150, purchase_date: "2023-01-15" },
-          { ticker: "TSLA", reference: "TSLA", shares: 5, avg_price: 180, purchase_date: "2023-06-20" },
-          { ticker: "NVDA", reference: "NVDA", shares: 8, avg_price: 400, purchase_date: "2023-11-01" },
+          { ticker: "AAPL", reference: "Apple (Main)", shares: 10, avg_price: 150, purchase_date: "2023-01-15", dividends_received: 0 },
+          { ticker: "TSLA", reference: "TSLA", shares: 5, avg_price: 180, purchase_date: "2023-06-20", dividends_received: 0 },
+          { ticker: "NVDA", reference: "NVDA", shares: 8, avg_price: 400, purchase_date: "2023-11-01", dividends_received: 0 },
         ];
         setHoldings(defaults);
         setLoadingHoldings(false);
@@ -124,9 +134,9 @@ export default function Dashboard() {
 
       if (!data || data.length === 0) {
         const defaults: HoldingInput[] = [
-          { ticker: "AAPL", reference: "Apple (Main)", shares: 10, avg_price: 150, purchase_date: "2023-01-15" },
-          { ticker: "TSLA", reference: "TSLA", shares: 5, avg_price: 180, purchase_date: "2023-06-20" },
-          { ticker: "NVDA", reference: "NVDA", shares: 8, avg_price: 400, purchase_date: "2023-11-01" },
+          { ticker: "AAPL", reference: "Apple (Main)", shares: 10, avg_price: 150, purchase_date: "2023-01-15", dividends_received: 0 },
+          { ticker: "TSLA", reference: "TSLA", shares: 5, avg_price: 180, purchase_date: "2023-06-20", dividends_received: 0 },
+          { ticker: "NVDA", reference: "NVDA", shares: 8, avg_price: 400, purchase_date: "2023-11-01", dividends_received: 0 },
         ];
         setHoldings(defaults);
         await supabase.from("holdings").insert(
@@ -137,6 +147,7 @@ export default function Dashboard() {
             shares: h.shares,
             avg_price: h.avg_price,
             purchase_date: h.purchase_date,
+            dividends_received: h.dividends_received,
           })),
         );
       } else {
@@ -147,6 +158,7 @@ export default function Dashboard() {
             shares: row.shares,
             avg_price: row.avg_price,
             purchase_date: row.purchase_date,
+            dividends_received: Number(row.dividends_received ?? 0) || 0,
           })),
         );
       }
@@ -185,6 +197,7 @@ export default function Dashboard() {
           shares: h.shares,
           avg_price: h.avg_price,
           purchase_date: h.purchase_date,
+          dividends_received: h.dividends_received,
         })),
       );
       if (insertError) {
@@ -205,7 +218,10 @@ export default function Dashboard() {
     setFetchError(null);
     try {
       const response = await axios.post("/api/portfolio", {
-        holdings,
+        holdings: holdings.map((h) => ({
+          ...h,
+          dividends_received: h.dividends_received,
+        })),
         display_currency: displayCurrency,
       });
       setMetrics(response.data);
@@ -260,7 +276,8 @@ export default function Dashboard() {
         reference: finalReference,
         shares: totalShares,
         avg_price: newAveragePrice,
-        purchase_date: earliestDate
+        purchase_date: earliestDate,
+        dividends_received: existing.dividends_received ?? 0,
       };
 
       setHoldings(updatedHoldings);
@@ -270,7 +287,8 @@ export default function Dashboard() {
         reference: finalReference,
         shares: sharesNum,
         avg_price: priceNum,
-        purchase_date: newDate
+        purchase_date: newDate,
+        dividends_received: 0,
       }]);
     }
 
@@ -280,6 +298,18 @@ export default function Dashboard() {
 
   const deleteHolding = (indexToRemove: number) => {
     setHoldings(holdings.filter((_, index) => index !== indexToRemove));
+  };
+
+  const setDividendForHolding = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = Number(divAmount);
+    if (!divRef || !Number.isFinite(amount) || amount < 0) return;
+    setHoldings((prev) =>
+      prev.map((h) =>
+        h.reference === divRef ? { ...h, dividends_received: amount } : h
+      )
+    );
+    setDivAmount("");
   };
 
   const pieData = metrics?.holdings || holdings.map(h => ({
@@ -384,14 +414,14 @@ export default function Dashboard() {
                   <tr className="text-slate-400 border-b border-white/10 text-xs uppercase tracking-wider">
                     <th className="pb-4 pl-2 font-medium">Asset Identity</th>
                     <th className="pb-4 pr-6 text-right font-medium">Weight</th>
-                    <th className="pb-4 pl-4 font-medium">Purchased</th>
                     <th className="pb-4 pl-4 font-medium">Shares</th>
                     <th className="pb-4 pl-4 font-medium">Avg Cost</th>
                     <th className="pb-4 pl-4 font-medium">Current</th>
                     <th className="pb-4 text-right font-medium">1d %</th>
-                    <th className="pb-4 text-right font-medium">Contrib 1d</th>
                     <th className="pb-4 text-right font-medium">Return %</th>
                     <th className="pb-4 text-right font-medium">Ann. Return</th>
+                    <th className="pb-4 text-right font-medium">Div Yield</th>
+                    <th className="pb-4 text-right font-medium">Div Received</th>
                     <th className="pb-4 text-right font-medium">Value ({displayCurrency})</th>
                     <th className="pb-4 text-right font-medium">Total P/L ({displayCurrency})</th>
                     <th className="pb-4 text-center font-medium">Drop</th>
@@ -402,13 +432,31 @@ export default function Dashboard() {
                     const h = metrics?.holdings[i];
                     const live = Boolean(h);
                     return (
-                    <tr key={`${holding.reference}-${i}`} className="border-b border-white/5 hover:bg-white/[0.03] transition-colors">
+                    <tr
+                      key={`${holding.reference}-${i}`}
+                      className="border-b border-white/5 hover:bg-white/[0.03] transition-colors"
+                      onMouseEnter={() => {
+                        if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+                        hoverTimer.current = window.setTimeout(() => setHoveredAssetIndex(i), 1000);
+                      }}
+                      onMouseLeave={() => {
+                        if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+                        hoverTimer.current = null;
+                        setHoveredAssetIndex(null);
+                      }}
+                    >
                       <td className="py-3 pl-2">
-                        <div className="font-bold text-white">{holding.reference}</div>
+                        <div className="font-bold text-white relative">
+                          {holding.reference}
+                          {hoveredAssetIndex === i && (
+                            <span className="absolute left-0 top-full mt-1 px-2 py-1 rounded bg-black/80 border border-white/10 text-[10px] text-slate-200 whitespace-nowrap">
+                              Purchased: {holding.purchase_date}
+                            </span>
+                          )}
+                        </div>
                         {holding.reference !== holding.ticker && <div className="text-[10px] text-cyan-400 uppercase tracking-wider mt-0.5">{holding.ticker}</div>}
                       </td>
                       <td className="py-3 pr-6 text-right text-slate-300 tabular-nums">{live && h != null && h.weight_percent != null ? `${h.weight_percent.toFixed(2)}%` : "—"}</td>
-                      <td className="py-3 pl-4 text-slate-400 text-sm">{holding.purchase_date}</td>
                       <td className="py-3 pl-4 text-slate-300">{holding.shares}</td>
                       <td className="py-3 pl-4 text-slate-300">
                         {live ? `${h!.avg_price.toFixed(2)} ${h!.quote_currency}` : `${holding.avg_price.toFixed(2)}`}
@@ -420,14 +468,17 @@ export default function Dashboard() {
                       <td className={`py-3 text-right font-medium tabular-nums ${live ? (h!.daily_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
                         {live ? `${h!.daily_return_percent > 0 ? '+' : ''}${h!.daily_return_percent.toFixed(2)}%` : "—"}
                       </td>
-                      <td className={`py-3 text-right tabular-nums ${live ? 'text-slate-300' : 'text-slate-500'} ${live && (h!.weight_contribution_daily_percent ?? 0) < 0 ? 'text-red-400/90' : ''}`}>
-                        {live ? `${(h!.weight_contribution_daily_percent ?? 0) > 0 ? '+' : ''}${h!.weight_contribution_daily_percent?.toFixed(3)}%` : "—"}
-                      </td>
                       <td className={`py-3 text-right font-medium ${live ? (h!.pnl_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
                         {live ? `${h!.pnl_percent > 0 ? '+' : ''}${h!.pnl_percent}%` : "—"}
                       </td>
                       <td className={`py-3 text-right font-medium ${live ? (h!.ann_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
                         {live ? `${h!.ann_return_percent > 0 ? '+' : ''}${h!.ann_return_percent}%` : "—"}
+                      </td>
+                      <td className="py-3 text-right text-slate-300 tabular-nums">
+                        {live ? `${(h!.dividend_yield_percent ?? 0).toFixed(2)}%` : "—"}
+                      </td>
+                      <td className="py-3 text-right text-slate-300 tabular-nums">
+                        {live ? `${currencySymbol}${h!.dividends_received_display.toLocaleString()}` : "—"}
                       </td>
                       <td className="py-3 text-right text-slate-300">
                         {live ? `${currencySymbol}${h!.market_value.toLocaleString()}` : "—"}
@@ -488,6 +539,48 @@ export default function Dashboard() {
                 </div>
                 <button type="submit" className="w-full flex items-center justify-center space-x-2 bg-gradient-to-r from-cyan-600 to-purple-600 hover:from-cyan-500 hover:to-purple-500 text-white py-2.5 rounded-lg font-medium transition-all mt-2 text-sm shadow-[0_0_15px_rgba(56,189,248,0.3)]">
                   <Plus className="w-4 h-4" /> <span>Execute</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Dividends */}
+            <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-xl p-6 shadow-2xl">
+              <h2 className="text-sm font-semibold mb-4 text-cyan-100 uppercase tracking-wider">Dividends</h2>
+              <form onSubmit={setDividendForHolding} className="space-y-4">
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Asset</label>
+                  <select
+                    value={divRef}
+                    onChange={(e) => setDivRef(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-cyan-500 transition-colors text-sm"
+                  >
+                    <option value="">Select…</option>
+                    {holdings.map((h) => (
+                      <option key={`div-${h.reference}`} value={h.reference}>
+                        {h.reference}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
+                    Total dividends received (in the asset’s currency)
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={divAmount}
+                    onChange={(e) => setDivAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white outline-none focus:border-cyan-500 transition-colors text-sm"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white py-2.5 rounded-lg font-medium transition-all text-sm"
+                >
+                  Save Dividends
                 </button>
               </form>
             </div>

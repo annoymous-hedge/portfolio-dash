@@ -12,6 +12,7 @@ type HoldingIn = {
   shares: number;
   avg_price: number;
   purchase_date: string;
+  dividends_received?: number; // user-entered total dividends (in quote currency)
 };
 
 type DisplayCurrency = "USD" | "MYR";
@@ -72,6 +73,22 @@ async function fetchFxRate(fromCurrency: string, toCurrency: string): Promise<nu
   return 1;
 }
 
+async function fetchDividendYieldPercent(ticker: string): Promise<number | null> {
+  try {
+    const q: any = await yahooFinance.quote(ticker);
+    const y = q?.trailingAnnualDividendYield;
+    if (typeof y === "number" && Number.isFinite(y)) return y * 100;
+    const rate = q?.trailingAnnualDividendRate;
+    const price = q?.regularMarketPrice;
+    if (typeof rate === "number" && typeof price === "number" && price > 0) {
+      return (rate / price) * 100;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 export async function POST(request: Request) {
   let holdings: HoldingIn[] = [];
   let displayCurrency: DisplayCurrency = "USD";
@@ -108,6 +125,9 @@ export async function POST(request: Request) {
     quote_currency: string;
     fx_rate_to_display: number;
     display_currency: DisplayCurrency;
+    dividends_received: number;
+    dividends_received_display: number;
+    dividend_yield_percent: number | null;
     weight_percent: number;
     weight_contribution_daily_percent: number;
   }> = [];
@@ -137,9 +157,12 @@ export async function POST(request: Request) {
 
       const marketValue = currentPrice * h.shares * fxRate;
       const cost = h.avg_price * h.shares * fxRate;
-      const pnl = marketValue - cost;
+      const pricePnl = marketValue - cost;
+      const dividendsReceived = Number(h.dividends_received ?? 0) || 0;
+      const dividendsReceivedDisplay = dividendsReceived * fxRate;
+      const pnl = pricePnl + dividendsReceivedDisplay;
       const pnlPercent =
-        h.avg_price > 0 ? ((currentPrice - h.avg_price) / h.avg_price) * 100 : 0;
+        cost > 0 ? (pnl / cost) * 100 : 0;
       const dailyPnl = (currentPrice - prevPrice) * h.shares * fxRate;
       const dailyReturnPercent =
         prevPrice > 0 ? ((currentPrice - prevPrice) / prevPrice) * 100 : 0;
@@ -158,13 +181,15 @@ export async function POST(request: Request) {
       }
       const yearsHeld = daysHeld / 365.25;
       let annReturnPercent: number;
-      if (yearsHeld > 0 && h.avg_price > 0) {
-        annReturnPercent = (Math.pow(currentPrice / h.avg_price, 1 / yearsHeld) - 1) * 100;
+      if (yearsHeld > 0 && cost > 0) {
+        const ratio = (marketValue + dividendsReceivedDisplay) / cost;
+        annReturnPercent = (Math.pow(ratio, 1 / yearsHeld) - 1) * 100;
       } else {
         annReturnPercent = pnlPercent;
       }
 
       const refName = h.reference?.trim() || ticker;
+      const dividendYieldPercent = await fetchDividendYieldPercent(ticker);
 
       totalValue += marketValue;
       totalCost += cost;
@@ -186,6 +211,9 @@ export async function POST(request: Request) {
         quote_currency: quoteCurrency,
         fx_rate_to_display: round4(fxRate),
         display_currency: displayCurrency,
+        dividends_received: round2(dividendsReceived),
+        dividends_received_display: round2(dividendsReceivedDisplay),
+        dividend_yield_percent: dividendYieldPercent != null ? round2(dividendYieldPercent) : null,
         weight_percent: 0,
         weight_contribution_daily_percent: 0,
       });
