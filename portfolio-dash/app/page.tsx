@@ -225,11 +225,22 @@ export default function Dashboard() {
   }, [clientId, holdings, loadingHoldings]);
 
   // Load portfolio settings (deposit + cash funds) from Supabase
+  // Also fetch live Yahoo Finance FX rate on startup
   useEffect(() => {
     if (!clientId) return;
     let cancelled = false;
 
     const loadSettings = async () => {
+      // Fetch live MYR/USD rate from Yahoo Finance immediately (in parallel with Supabase)
+      fetch("/api/fx")
+        .then((r) => r.json())
+        .then((d) => {
+          if (!cancelled && d.myr_per_usd && d.myr_per_usd > 0) {
+            setMyrUsdRate(d.myr_per_usd);
+          }
+        })
+        .catch(() => { /* keep fallback */ });
+
       if (!supabase) {
         if (!cancelled) setLoadingSettings(false);
         return;
