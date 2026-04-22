@@ -71,6 +71,9 @@ export default function Dashboard() {
   // Portfolio deposit amount for absolute return
   const [depositInput, setDepositInput] = useState("");
   const [totalDeposit, setTotalDeposit] = useState(0);
+  const [depositCurrency, setDepositCurrency] = useState<"USD" | "MYR">("MYR");
+  const [myrUsdRate, setMyrUsdRate] = useState<number>(4.4); // fallback rate
+  const [loadingSettings, setLoadingSettings] = useState(true);
 
   // Cash fund tracking (named funds with additive deposit/value)
   const [cashFundName, setCashFundName] = useState("");
@@ -218,6 +221,68 @@ export default function Dashboard() {
     void sync();
   }, [clientId, holdings, loadingHoldings]);
 
+  // Load portfolio settings (deposit + cash funds) from Supabase
+  useEffect(() => {
+    if (!clientId) return;
+    let cancelled = false;
+
+    const loadSettings = async () => {
+      // Fetch live MYR/USD rate regardless of Supabase
+      try {
+        const fxRes = await fetch("/api/fx");
+        if (fxRes.ok) {
+          const fxData = await fxRes.json();
+          if (fxData.myr_per_usd && fxData.myr_per_usd > 0) {
+            if (!cancelled) setMyrUsdRate(fxData.myr_per_usd);
+          }
+        }
+      } catch {
+        // keep fallback rate
+      }
+
+      if (!supabase) {
+        if (!cancelled) setLoadingSettings(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("portfolio_settings")
+        .select("*")
+        .eq("client_id", clientId)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Failed to load portfolio settings", error);
+      } else if (data) {
+        setTotalDeposit(Number(data.total_deposit) || 0);
+        setDepositCurrency((data.deposit_currency as "USD" | "MYR") || "MYR");
+        const funds = data.cash_funds;
+        if (Array.isArray(funds)) {
+          setCashFunds(funds);
+        }
+      }
+
+      setLoadingSettings(false);
+    };
+
+    void loadSettings();
+    return () => { cancelled = true; };
+  }, [clientId]);
+
+  // Helper: persist portfolio settings to Supabase
+  const saveSettings = async (deposit: number, depCurrency: "USD" | "MYR", funds: {name: string; deposit: number; currentValue: number}[]) => {
+    if (!clientId || !supabase) return;
+    const { error } = await supabase
+      .from("portfolio_settings")
+      .upsert(
+        { client_id: clientId, total_deposit: deposit, deposit_currency: depCurrency, cash_funds: funds },
+        { onConflict: "client_id" }
+      );
+    if (error) console.error("Failed to save portfolio settings", error);
+  };
+
   const fetchMetrics = async () => {
     if (holdings.length === 0) {
       setMetrics(null);
@@ -328,24 +393,26 @@ export default function Dashboard() {
     const deposit = Number(cashFundDeposit);
     const value = Number(cashFundValue);
     if (!name) return;
-    // At least one of deposit or value must be provided
     const dep = Number.isFinite(deposit) && deposit > 0 ? deposit : 0;
     const val = Number.isFinite(value) && value > 0 ? value : 0;
     if (dep === 0 && val === 0) return;
 
     setCashFunds((prev) => {
+      let newFunds: {name: string; deposit: number; currentValue: number}[];
       const existingIdx = prev.findIndex((f) => f.name === name);
       if (existingIdx >= 0) {
-        // Add to existing fund
         const updated = [...prev];
         updated[existingIdx] = {
           ...updated[existingIdx],
           deposit: updated[existingIdx].deposit + dep,
           currentValue: updated[existingIdx].currentValue + val,
         };
-        return updated;
+        newFunds = updated;
+      } else {
+        newFunds = [...prev, { name, deposit: dep, currentValue: val }];
       }
-      return [...prev, { name, deposit: dep, currentValue: val }];
+      void saveSettings(totalDeposit, depositCurrency, newFunds);
+      return newFunds;
     });
     setCashFundName("");
     setCashFundDeposit("");
@@ -353,15 +420,21 @@ export default function Dashboard() {
   };
 
   const deleteCashFund = (indexToRemove: number) => {
-    setCashFunds((prev) => prev.filter((_, i) => i !== indexToRemove));
+    setCashFunds((prev) => {
+      const newFunds = prev.filter((_, i) => i !== indexToRemove);
+      void saveSettings(totalDeposit, depositCurrency, newFunds);
+      return newFunds;
+    });
   };
 
   const addDeposit = (e: React.FormEvent) => {
     e.preventDefault();
     const amount = Number(depositInput);
     if (!Number.isFinite(amount) || amount <= 0) return;
-    setTotalDeposit((prev) => prev + amount);
+    const newDeposit = totalDeposit + amount;
+    setTotalDeposit(newDeposit);
     setDepositInput("");
+    void saveSettings(newDeposit, depositCurrency, cashFunds);
   };
 
   // Computed values for KPI cards
@@ -375,9 +448,16 @@ export default function Dashboard() {
   const cashFundPnl = totalCashValue - totalCashDeposit;
 
   // Absolute return = (profit + cash fund pnl + total div received) / total deposit amount
+  // If deposit is in MYR but display is USD, convert deposit to USD for the ratio
   const totalProfit = (metrics?.total_pnl || 0) + cashFundPnl;
   const absoluteReturnValue = totalProfit + totalDividendsReceived;
-  const absoluteReturnPercent = totalDeposit > 0 ? (absoluteReturnValue / totalDeposit) * 100 : 0;
+  const depositInDisplayCurrency =
+    depositCurrency === "MYR" && displayCurrency === "USD"
+      ? totalDeposit / myrUsdRate
+      : depositCurrency === "USD" && displayCurrency === "MYR"
+      ? totalDeposit * myrUsdRate
+      : totalDeposit;
+  const absoluteReturnPercent = depositInDisplayCurrency > 0 ? (absoluteReturnValue / depositInDisplayCurrency) * 100 : 0;
 
   // Pie chart data: holdings + cash funds
   const holdingsPieData = metrics?.holdings || holdings.map(h => ({
@@ -709,7 +789,24 @@ export default function Dashboard() {
               <form onSubmit={addDeposit} className="space-y-4">
                 <div>
                   <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
-                    Add Deposit Amount ({displayCurrency})
+                    Deposit Currency
+                  </label>
+                  <select
+                    value={depositCurrency}
+                    onChange={(e) => {
+                      const cur = e.target.value as "USD" | "MYR";
+                      setDepositCurrency(cur);
+                      void saveSettings(totalDeposit, cur, cashFunds);
+                    }}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-cyan-500 transition-colors text-sm"
+                  >
+                    <option value="MYR">MYR (RM)</option>
+                    <option value="USD">USD ($)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
+                    Add Deposit Amount ({depositCurrency})
                   </label>
                   <input
                     type="number"
@@ -730,11 +827,19 @@ export default function Dashboard() {
               </form>
               <div className="mt-3 flex items-center justify-between bg-white/5 rounded-lg px-3 py-2 text-sm">
                 <span className="text-slate-400">Total Deposited</span>
-                <span className="text-white font-medium tabular-nums">{currencySymbol}{totalDeposit.toLocaleString()}</span>
+                <span className="text-white font-medium tabular-nums">
+                  {depositCurrency === "MYR" ? "RM" : "$"}{totalDeposit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
               </div>
+              {depositCurrency !== displayCurrency && totalDeposit > 0 && (
+                <div className="mt-1 text-[10px] text-slate-500 px-1">
+                  ≈ {displayCurrency === "USD" ? "$" : "RM"}{(depositInDisplayCurrency).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {displayCurrency}
+                  <span className="ml-1 text-slate-600">(rate: {myrUsdRate.toFixed(4)})</span>
+                </div>
+              )}
               {totalDeposit > 0 && (
                 <button
-                  onClick={() => setTotalDeposit(0)}
+                  onClick={() => { setTotalDeposit(0); void saveSettings(0, depositCurrency, cashFunds); }}
                   className="mt-2 text-[10px] text-slate-500 hover:text-red-400 transition-colors"
                 >
                   Reset deposit
