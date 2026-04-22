@@ -23,14 +23,45 @@ class Holding(BaseModel):
     shares: float
     avg_price: float
     purchase_date: str
+    dividends_received: Optional[float] = 0.0
+
+
+class PortfolioRequest(BaseModel):
+    holdings: List[Holding]
+    display_currency: Optional[str] = "USD"
+
+
+def get_fx_rate(display_currency: str) -> float:
+    """Return how many display-currency units equal 1 USD.
+    For USD display: 1.0  (no conversion)
+    For MYR display: fetch MYRX=X (MYR per 1 USD) from yfinance.
+    Falls back to 4.4 if the fetch fails.
+    """
+    if display_currency != "MYR":
+        return 1.0
+    try:
+        fx = yf.Ticker("MYRX=X")
+        hist = fx.history(period="1d")
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
+    except Exception as e:
+        print(f"FX fetch failed: {e}")
+    return 4.4  # sensible fallback
 
 
 @app.post("/api/portfolio")
-def get_portfolio_metrics(holdings: List[Holding]):
+def get_portfolio_metrics(req: PortfolioRequest):
+    holdings = req.holdings
+    display_currency = req.display_currency or "USD"
+
+    # Fetch the FX rate ONCE — the same rate used for every value in the response
+    fx = get_fx_rate(display_currency)
+
     metrics = []
-    total_value = 0
-    total_cost = 0
-    total_daily_pnl = 0
+    total_value_usd = 0
+    total_cost_usd = 0
+    total_daily_pnl_usd = 0
+    total_dividends_display = 0
 
     today = datetime.now().date()
 
@@ -72,9 +103,9 @@ def get_portfolio_metrics(holdings: List[Holding]):
             else:
                 ann_return_percent = pnl_percent
 
-            total_value += market_value
-            total_cost += cost
-            total_daily_pnl += daily_pnl
+            total_value_usd += market_value
+            total_cost_usd += cost
+            total_daily_pnl_usd += daily_pnl
 
             ref_name = h.reference if h.reference else h.ticker.upper()
 
@@ -82,34 +113,49 @@ def get_portfolio_metrics(holdings: List[Holding]):
                 ((current_price - prev_price) / prev_price) * 100 if prev_price > 0 else 0
             )
 
+            # Dividends stored in the asset's native currency (USD for US stocks).
+            # Convert to display currency using the same fx rate.
+            div_display = (h.dividends_received or 0.0) * fx
+            total_dividends_display += div_display
+
             metrics.append(
                 {
                     "ticker": h.ticker.upper(),
                     "reference": ref_name,
                     "shares": h.shares,
-                    "avg_price": h.avg_price,
+                    "avg_price": round(h.avg_price * fx, 4),
                     "purchase_date": h.purchase_date,
-                    "current_price": round(current_price, 2),
-                    "market_value": round(market_value, 2),
-                    "pnl": round(pnl, 2),
+                    "current_price": round(current_price * fx, 4),
+                    "market_value": round(market_value * fx, 2),
+                    "pnl": round(pnl * fx, 2),
                     "pnl_percent": round(pnl_percent, 2),
                     "ann_return_percent": round(ann_return_percent, 2),
-                    "daily_pnl": round(daily_pnl, 2),
+                    "daily_pnl": round(daily_pnl * fx, 2),
                     "daily_return_percent": round(daily_return_percent, 2),
+                    "dividends_received": h.dividends_received or 0.0,
+                    "dividends_received_display": round(div_display, 2),
                     "weight_percent": 0,
                     "weight_contribution_daily_percent": 0,
+                    "display_currency": display_currency,
+                    "fx_rate_to_display": fx,
                 }
             )
         except Exception as e:
             print(f"Error fetching {h.ticker}: {e}")
 
-    portfolio_daily_return_percent = 0
-    portfolio_weighted_ann_return_percent = 0
-    portfolio_weighted_total_return_percent = 0
+    total_value = round(total_value_usd * fx, 2)
+    total_cost  = round(total_cost_usd * fx, 2)
+    total_pnl   = round((total_value_usd - total_cost_usd) * fx, 2)
+    total_daily_pnl = round(total_daily_pnl_usd * fx, 2)
 
-    if total_value > 0:
+    portfolio_daily_return_percent = 0.0
+    portfolio_weighted_ann_return_percent = 0.0
+    portfolio_weighted_total_return_percent = 0.0
+
+    if total_value_usd > 0:
         for m in metrics:
-            w = m["market_value"] / total_value
+            # weights are currency-neutral (ratio of USD values)
+            w = (m["market_value"] / fx) / total_value_usd
             m["weight_percent"] = round(w * 100, 2)
             m["weight_contribution_daily_percent"] = round(w * m["daily_return_percent"], 3)
             portfolio_daily_return_percent += w * m["daily_return_percent"]
@@ -121,13 +167,16 @@ def get_portfolio_metrics(holdings: List[Holding]):
 
     return {
         "holdings": metrics,
-        "total_value": round(total_value, 2),
-        "total_cost": round(total_cost, 2),
-        "total_pnl": round(total_value - total_cost, 2),
-        "total_pnl_percent": round(((total_value - total_cost) / total_cost) * 100, 2)
-        if total_cost > 0
+        "display_currency": display_currency,
+        "fx_rate_usd_to_display": fx,          # ← single source of truth for FX
+        "total_value": total_value,
+        "total_cost": total_cost,
+        "total_pnl": total_pnl,
+        "total_pnl_percent": round(((total_value_usd - total_cost_usd) / total_cost_usd) * 100, 2)
+        if total_cost_usd > 0
         else 0,
-        "total_daily_pnl": round(total_daily_pnl, 2),
+        "total_daily_pnl": total_daily_pnl,
+        "total_dividends_display": round(total_dividends_display, 2),
         "portfolio_daily_return_percent": round(portfolio_daily_return_percent, 2),
         "portfolio_weighted_ann_return_percent": round(portfolio_weighted_ann_return_percent, 2),
         "portfolio_weighted_total_return_percent": round(portfolio_weighted_total_return_percent, 2),
@@ -135,4 +184,4 @@ def get_portfolio_metrics(holdings: List[Holding]):
         "best_performer_pnl": round(best_performer["pnl_percent"], 2) if best_performer else 0,
         "worst_performer": worst_performer["reference"] if worst_performer else "N/A",
         "worst_performer_pnl": round(worst_performer["pnl_percent"], 2) if worst_performer else 0,
-    }   
+    }

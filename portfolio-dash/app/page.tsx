@@ -42,11 +42,13 @@ interface PortfolioMetrics {
     weight_contribution_daily_percent: number;
   }[];
   display_currency: "USD" | "MYR";
+  fx_rate_usd_to_display: number;   // the single FX source of truth from the backend
   total_value: number;
   total_cost: number;
   total_pnl: number;
   total_pnl_percent: number;
   total_daily_pnl: number;
+  total_dividends_display: number;
   portfolio_daily_return_percent: number;
   portfolio_weighted_ann_return_percent: number;
   portfolio_weighted_total_return_percent: number;
@@ -227,19 +229,6 @@ export default function Dashboard() {
     let cancelled = false;
 
     const loadSettings = async () => {
-      // Fetch live MYR/USD rate regardless of Supabase
-      try {
-        const fxRes = await fetch("/api/fx");
-        if (fxRes.ok) {
-          const fxData = await fxRes.json();
-          if (fxData.myr_per_usd && fxData.myr_per_usd > 0) {
-            if (!cancelled) setMyrUsdRate(fxData.myr_per_usd);
-          }
-        }
-      } catch {
-        // keep fallback rate
-      }
-
       if (!supabase) {
         if (!cancelled) setLoadingSettings(false);
         return;
@@ -299,7 +288,13 @@ export default function Dashboard() {
         })),
         display_currency: displayCurrency,
       });
-      setMetrics(response.data);
+      const data = response.data;
+      setMetrics(data);
+      // Sync the FX rate used by the backend — this is the single source of truth.
+      // The deposit conversion uses this exact same rate so the numbers are consistent.
+      if (data.fx_rate_usd_to_display && data.fx_rate_usd_to_display > 0) {
+        setMyrUsdRate(data.fx_rate_usd_to_display);
+      }
     } catch (error) {
       console.error("Failed to fetch metrics", error);
       setMetrics(null);
@@ -472,6 +467,9 @@ export default function Dashboard() {
   const pieData = [...holdingsPieData, ...cashPieData];
   const pieTotal = pieData.reduce((sum, item) => sum + Number(item.market_value || 0), 0);
 
+  // Total portfolio value = stock holdings value + cash fund current values
+  const totalPortfolioValue = (metrics?.total_value || 0) + totalCashValue;
+
   return (
     <main className="min-h-screen text-slate-300 font-sans p-4 md:p-8 relative selection:bg-cyan-500/30">
 
@@ -512,7 +510,7 @@ export default function Dashboard() {
 
         {/* Top KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          <KPICard title={`Total Portfolio Value (${displayCurrency})`} value={`${currencySymbol}${metrics?.total_value.toLocaleString() || "0.00"}`} icon={<DollarSign />} glow="rgba(56,189,248,0.15)" />
+          <KPICard title={`Total Portfolio Value (${displayCurrency})`} value={`${currencySymbol}${totalPortfolioValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} icon={<DollarSign />} glow="rgba(56,189,248,0.15)" />
           <KPICard title={`All-Time Profit / Loss (${displayCurrency})`} value={`${currencySymbol}${totalProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} subtitle={metrics ? `${metrics.total_pnl_percent || 0}%` : undefined} icon={<TrendingUp />} isPositive={totalProfit >= 0} glow={totalProfit >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"} />
           <KPICard title={`Today's Daily P/L (${displayCurrency})`} value={`${currencySymbol}${metrics?.total_daily_pnl.toLocaleString() || "0.00"}`} icon={<Calendar />} isPositive={metrics ? metrics.total_daily_pnl >= 0 : undefined} glow={metrics && metrics.total_daily_pnl >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"} />
           <KPICard
