@@ -42,7 +42,7 @@ interface PortfolioMetrics {
     weight_contribution_daily_percent: number;
   }[];
   display_currency: "USD" | "MYR";
-  fx_rate_usd_to_display: number;   // the single FX source of truth from the backend
+  fx_rate_usd_to_display: number;
   total_value: number;
   total_cost: number;
   total_pnl: number;
@@ -52,6 +52,8 @@ interface PortfolioMetrics {
   portfolio_daily_return_percent: number;
   portfolio_weighted_ann_return_percent: number;
   portfolio_weighted_total_return_percent: number;
+  twr_percent: number | null;
+  irr_percent: number | null;
   best_performer: string;
   best_performer_pnl: number;
   worst_performer: string;
@@ -75,6 +77,7 @@ export default function Dashboard() {
   const [totalDeposit, setTotalDeposit] = useState(0);
   const [depositCurrency, setDepositCurrency] = useState<"USD" | "MYR">("MYR");
   const [myrUsdRate, setMyrUsdRate] = useState<number>(4.4); // fallback rate
+  const [rateIsLive, setRateIsLive] = useState(false);        // true once Yahoo Finance responds
   const [loadingSettings, setLoadingSettings] = useState(true);
 
   // Cash fund tracking (named funds with additive deposit/value)
@@ -237,6 +240,8 @@ export default function Dashboard() {
         .then((d) => {
           if (!cancelled && d.myr_per_usd && d.myr_per_usd > 0) {
             setMyrUsdRate(d.myr_per_usd);
+            // Only mark as live if Yahoo Finance actually responded (not the hard fallback)
+            if (!d.fallback) setRateIsLive(true);
           }
         })
         .catch(() => { /* keep fallback */ });
@@ -303,9 +308,9 @@ export default function Dashboard() {
       const data = response.data;
       setMetrics(data);
       // Sync the FX rate used by the backend — this is the single source of truth.
-      // The deposit conversion uses this exact same rate so the numbers are consistent.
       if (data.fx_rate_usd_to_display && data.fx_rate_usd_to_display > 0) {
         setMyrUsdRate(data.fx_rate_usd_to_display);
+        setRateIsLive(true); // backend confirmed a real rate
       }
     } catch (error) {
       console.error("Failed to fetch metrics", error);
@@ -576,6 +581,24 @@ export default function Dashboard() {
             icon={<TrendingUp />}
             isPositive={absoluteReturnPercent >= 0}
             glow={absoluteReturnPercent >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}
+          />
+          <KPICard
+            title="Time-Weighted Return (TWR)"
+            value={metrics?.twr_percent != null ? `${metrics.twr_percent > 0 ? "+" : ""}${metrics.twr_percent.toFixed(2)}%` : "—"}
+            subtitle="Chain-linked HPR"
+            subtitlePlain
+            icon={<TrendingUp />}
+            isPositive={metrics?.twr_percent != null ? metrics.twr_percent >= 0 : undefined}
+            glow={metrics?.twr_percent != null && metrics.twr_percent >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}
+          />
+          <KPICard
+            title="Money-Weighted Return (IRR)"
+            value={metrics?.irr_percent != null ? `${metrics.irr_percent > 0 ? "+" : ""}${metrics.irr_percent.toFixed(2)}%` : "—"}
+            subtitle="Annualised XIRR"
+            subtitlePlain
+            icon={<TrendingUp />}
+            isPositive={metrics?.irr_percent != null ? metrics.irr_percent >= 0 : undefined}
+            glow={metrics?.irr_percent != null && metrics.irr_percent >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}
           />
           <KPICard title="Active Assets" value={holdings.length.toString()} icon={<PieChartIcon />} glow="rgba(192,132,252,0.15)" />
           <KPICard title="Best Performer" value={metrics?.best_performer || "N/A"} subtitle={`${metrics?.best_performer_pnl || 0}%`} icon={<Award />} isPositive={true} glow="rgba(52,211,153,0.15)" />
@@ -855,9 +878,15 @@ export default function Dashboard() {
                 </span>
               </div>
               {depositCurrency !== displayCurrency && totalDeposit > 0 && (
-                <div className="mt-1 text-[10px] text-slate-500 px-1">
-                  ≈ {displayCurrency === "USD" ? "$" : "RM"}{(depositInDisplayCurrency).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {displayCurrency}
-                  <span className="ml-1 text-slate-600">(rate: {myrUsdRate.toFixed(4)})</span>
+                <div className="mt-1 text-[10px] px-1">
+                  {rateIsLive ? (
+                    <span className="text-slate-500">
+                      ≈ {displayCurrency === "USD" ? "$" : "RM"}{depositInDisplayCurrency.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {displayCurrency}
+                      <span className="ml-1 text-slate-600">(rate: {myrUsdRate.toFixed(4)} · Yahoo Finance)</span>
+                    </span>
+                  ) : (
+                    <span className="text-amber-500/70 animate-pulse">Fetching live rate from Yahoo Finance…</span>
+                  )}
                 </div>
               )}
               {totalDeposit > 0 && (
