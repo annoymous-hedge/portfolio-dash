@@ -372,16 +372,24 @@ export default function Dashboard() {
   const totalCashDeposit = cashFunds.reduce((sum, f) => sum + f.deposit, 0);
   const totalCashValue = cashFunds.reduce((sum, f) => sum + f.currentValue, 0);
   const cashFundReturn = totalCashDeposit > 0 ? ((totalCashValue - totalCashDeposit) / totalCashDeposit) * 100 : 0;
+  const cashFundPnl = totalCashValue - totalCashDeposit;
 
-  // Absolute return = (profit + total div received) / total deposit amount
-  const totalProfit = metrics?.total_pnl || 0;
+  // Absolute return = (profit + cash fund pnl + total div received) / total deposit amount
+  const totalProfit = (metrics?.total_pnl || 0) + cashFundPnl;
   const absoluteReturnValue = totalProfit + totalDividendsReceived;
   const absoluteReturnPercent = totalDeposit > 0 ? (absoluteReturnValue / totalDeposit) * 100 : 0;
 
-  const pieData = metrics?.holdings || holdings.map(h => ({
+  // Pie chart data: holdings + cash funds
+  const holdingsPieData = metrics?.holdings || holdings.map(h => ({
     reference: h.reference,
     market_value: h.shares * h.avg_price
   }));
+  const cashPieData = cashFunds.map(f => ({
+    reference: f.name,
+    market_value: f.currentValue,
+    isCashFund: true,
+  }));
+  const pieData = [...holdingsPieData, ...cashPieData];
   const pieTotal = pieData.reduce((sum, item) => sum + Number(item.market_value || 0), 0);
 
   return (
@@ -425,7 +433,7 @@ export default function Dashboard() {
         {/* Top KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           <KPICard title={`Total Portfolio Value (${displayCurrency})`} value={`${currencySymbol}${metrics?.total_value.toLocaleString() || "0.00"}`} icon={<DollarSign />} glow="rgba(56,189,248,0.15)" />
-          <KPICard title={`All-Time Profit / Loss (${displayCurrency})`} value={`${currencySymbol}${metrics?.total_pnl.toLocaleString() || "0.00"}`} subtitle={`${metrics?.total_pnl_percent || 0}%`} icon={<TrendingUp />} isPositive={metrics ? metrics.total_pnl >= 0 : undefined} glow={metrics && metrics.total_pnl >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"} />
+          <KPICard title={`All-Time Profit / Loss (${displayCurrency})`} value={`${currencySymbol}${totalProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} subtitle={metrics ? `${metrics.total_pnl_percent || 0}%` : undefined} icon={<TrendingUp />} isPositive={totalProfit >= 0} glow={totalProfit >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"} />
           <KPICard title={`Today's Daily P/L (${displayCurrency})`} value={`${currencySymbol}${metrics?.total_daily_pnl.toLocaleString() || "0.00"}`} icon={<Calendar />} isPositive={metrics ? metrics.total_daily_pnl >= 0 : undefined} glow={metrics && metrics.total_daily_pnl >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"} />
           <KPICard
             title="Portfolio Daily Return (weighted)"
@@ -489,7 +497,7 @@ export default function Dashboard() {
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="text-slate-400 border-b border-white/10 uppercase tracking-wider">
-                    <th className="pb-3 pl-2 font-medium">Asset</th>
+                    <th className="pb-3 pl-2 font-medium w-28 max-w-[7rem]">Asset</th>
                     <th className="pb-3 text-right font-medium">Wt%</th>
                     <th className="pb-3 text-right font-medium">Shares</th>
                     <th className="pb-3 text-right font-medium">Avg</th>
@@ -521,16 +529,16 @@ export default function Dashboard() {
                         setHoveredAssetIndex(null);
                       }}
                     >
-                      <td className="py-2 pl-2">
-                        <div className="font-bold text-white text-sm relative">
+                      <td className="py-2 pl-2 w-28 max-w-[7rem]">
+                        <div className="font-bold text-white text-sm relative truncate max-w-[6.5rem]">
                           {holding.reference}
                           {hoveredAssetIndex === i && (
                             <span className="absolute left-0 top-full mt-1 px-2 py-1 rounded bg-black/80 border border-white/10 text-[10px] text-slate-200 whitespace-nowrap z-20">
-                              Purchased: {holding.purchase_date}
+                              {holding.reference} — Purchased: {holding.purchase_date}
                             </span>
                           )}
                         </div>
-                        {holding.reference !== holding.ticker && <div className="text-[10px] text-cyan-400 uppercase tracking-wider">{holding.ticker}</div>}
+                        {holding.reference !== holding.ticker && <div className="text-[10px] text-cyan-400 uppercase tracking-wider truncate max-w-[6.5rem]">{holding.ticker}</div>}
                       </td>
                       <td className="py-2 text-right text-slate-300 tabular-nums">{live && h != null && h.weight_percent != null ? `${h.weight_percent.toFixed(1)}%` : "—"}</td>
                       <td className="py-2 text-right text-slate-300 tabular-nums">{holding.shares}</td>
@@ -579,8 +587,8 @@ export default function Dashboard() {
                     const pnl = fund.currentValue - fund.deposit;
                     return (
                       <tr key={`cash-ledger-${idx}`} className="border-b border-white/5 hover:bg-white/[0.03] transition-colors bg-purple-500/[0.03]">
-                        <td className="py-2 pl-2">
-                          <div className="font-bold text-purple-300 text-sm">{fund.name}</div>
+                        <td className="py-2 pl-2 w-28 max-w-[7rem]">
+                          <div className="font-bold text-purple-300 text-sm truncate max-w-[6.5rem]">{fund.name}</div>
                           <div className="text-[10px] text-purple-400/70 uppercase tracking-wider">Cash Fund</div>
                         </td>
                         <td className="py-2 text-right text-slate-500">—</td>
@@ -811,7 +819,7 @@ export default function Dashboard() {
             <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-xl p-6 shadow-2xl">
               <h2 className="text-sm font-semibold mb-4 text-cyan-100 uppercase tracking-wider">Allocation</h2>
               <div className="h-[250px] -ml-4">
-                {holdings.length > 0 ? (
+                {pieData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
