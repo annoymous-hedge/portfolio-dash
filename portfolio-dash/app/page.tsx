@@ -68,6 +68,11 @@ export default function Dashboard() {
   const [loadingHoldings, setLoadingHoldings] = useState(true);
   const [displayCurrency, setDisplayCurrency] = useState<"USD" | "MYR">("USD");
 
+  // Cash fund tracking
+  const [cashFundDeposit, setCashFundDeposit] = useState("");
+  const [cashFundValue, setCashFundValue] = useState("");
+  const [cashFunds, setCashFunds] = useState<{deposit: number; currentValue: number}[]>([]);
+
   const [newTicker, setNewTicker] = useState("");
   const[newReference, setNewReference] = useState("");
   const [newShares, setNewShares] = useState("");
@@ -303,14 +308,41 @@ export default function Dashboard() {
   const setDividendForHolding = (e: React.FormEvent) => {
     e.preventDefault();
     const amount = Number(divAmount);
-    if (!divRef || !Number.isFinite(amount) || amount < 0) return;
+    if (!divRef || !Number.isFinite(amount) || amount <= 0) return;
     setHoldings((prev) =>
       prev.map((h) =>
-        h.reference === divRef ? { ...h, dividends_received: amount } : h
+        h.reference === divRef ? { ...h, dividends_received: (h.dividends_received || 0) + amount } : h
       )
     );
     setDivAmount("");
   };
+
+  const addCashFund = (e: React.FormEvent) => {
+    e.preventDefault();
+    const deposit = Number(cashFundDeposit);
+    const value = Number(cashFundValue);
+    if (!Number.isFinite(deposit) || deposit <= 0 || !Number.isFinite(value) || value <= 0) return;
+    setCashFunds((prev) => [...prev, { deposit, currentValue: value }]);
+    setCashFundDeposit("");
+    setCashFundValue("");
+  };
+
+  const deleteCashFund = (indexToRemove: number) => {
+    setCashFunds((prev) => prev.filter((_, i) => i !== indexToRemove));
+  };
+
+  // Computed values for KPI cards
+  const totalDividendsReceived = metrics
+    ? metrics.holdings.reduce((sum, h) => sum + (h.dividends_received_display || 0), 0)
+    : 0;
+
+  const absoluteReturn = metrics
+    ? metrics.total_pnl_percent
+    : 0;
+
+  const totalCashDeposit = cashFunds.reduce((sum, f) => sum + f.deposit, 0);
+  const totalCashValue = cashFunds.reduce((sum, f) => sum + f.currentValue, 0);
+  const cashFundReturn = totalCashDeposit > 0 ? ((totalCashValue - totalCashDeposit) / totalCashDeposit) * 100 : 0;
 
   const pieData = metrics?.holdings || holdings.map(h => ({
     reference: h.reference,
@@ -388,6 +420,21 @@ export default function Dashboard() {
             isPositive={metrics ? metrics.portfolio_weighted_total_return_percent >= 0 : undefined}
             glow={metrics && metrics.portfolio_weighted_total_return_percent >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}
           />
+          <KPICard
+            title={`Total Div Received (${displayCurrency})`}
+            value={`${currencySymbol}${totalDividendsReceived.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            icon={<DollarSign />}
+            glow="rgba(52,211,153,0.15)"
+          />
+          <KPICard
+            title="Absolute Return"
+            value={`${absoluteReturn > 0 ? "+" : ""}${absoluteReturn.toFixed(2)}%`}
+            subtitle={`${currencySymbol}${metrics?.total_pnl?.toLocaleString() || "0.00"}`}
+            subtitlePlain
+            icon={<TrendingUp />}
+            isPositive={absoluteReturn >= 0}
+            glow={absoluteReturn >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}
+          />
           <KPICard title="Active Assets" value={holdings.length.toString()} icon={<PieChartIcon />} glow="rgba(192,132,252,0.15)" />
           <KPICard title="Best Performer" value={metrics?.best_performer || "N/A"} subtitle={`${metrics?.best_performer_pnl || 0}%`} icon={<Award />} isPositive={true} glow="rgba(52,211,153,0.15)" />
           <KPICard title="Worst Performer" value={metrics?.worst_performer || "N/A"} subtitle={`${metrics?.worst_performer_pnl || 0}%`} icon={<AlertTriangle />} isPositive={false} glow="rgba(248,113,113,0.15)" />
@@ -413,14 +460,13 @@ export default function Dashboard() {
                 <thead>
                   <tr className="text-slate-400 border-b border-white/10 text-xs uppercase tracking-wider">
                     <th className="pb-4 pl-2 font-medium">Asset Identity</th>
-                    <th className="pb-4 pr-6 text-right font-medium">Weight</th>
-                    <th className="pb-4 pl-4 font-medium">Shares</th>
+                    <th className="pb-4 pr-2 text-right font-medium">Weight</th>
+                    <th className="pb-4 pl-2 font-medium">Shares</th>
                     <th className="pb-4 pl-4 font-medium">Avg Cost</th>
                     <th className="pb-4 pl-4 font-medium">Current</th>
                     <th className="pb-4 text-right font-medium">1d %</th>
                     <th className="pb-4 text-right font-medium">Return %</th>
                     <th className="pb-4 text-right font-medium">Ann. Return</th>
-                    <th className="pb-4 text-right font-medium">Div Yield</th>
                     <th className="pb-4 text-right font-medium">Div Received</th>
                     <th className="pb-4 text-right font-medium">Value ({displayCurrency})</th>
                     <th className="pb-4 text-right font-medium">Total P/L ({displayCurrency})</th>
@@ -456,8 +502,8 @@ export default function Dashboard() {
                         </div>
                         {holding.reference !== holding.ticker && <div className="text-[10px] text-cyan-400 uppercase tracking-wider mt-0.5">{holding.ticker}</div>}
                       </td>
-                      <td className="py-3 pr-6 text-right text-slate-300 tabular-nums">{live && h != null && h.weight_percent != null ? `${h.weight_percent.toFixed(2)}%` : "—"}</td>
-                      <td className="py-3 pl-4 text-slate-300">{holding.shares}</td>
+                      <td className="py-3 pr-2 text-right text-slate-300 tabular-nums">{live && h != null && h.weight_percent != null ? `${h.weight_percent.toFixed(2)}%` : "—"}</td>
+                      <td className="py-3 pl-2 text-slate-300">{holding.shares}</td>
                       <td className="py-3 pl-4 text-slate-300">
                         {live ? `${h!.avg_price.toFixed(2)} ${h!.quote_currency}` : `${holding.avg_price.toFixed(2)}`}
                       </td>
@@ -474,9 +520,7 @@ export default function Dashboard() {
                       <td className={`py-3 text-right font-medium ${live ? (h!.ann_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
                         {live ? `${h!.ann_return_percent > 0 ? '+' : ''}${h!.ann_return_percent}%` : "—"}
                       </td>
-                      <td className="py-3 text-right text-slate-300 tabular-nums">
-                        {live ? `${(h!.dividend_yield_percent ?? 0).toFixed(2)}%` : "—"}
-                      </td>
+
                       <td className="py-3 text-right text-slate-300 tabular-nums">
                         {live ? `${currencySymbol}${h!.dividends_received_display.toLocaleString()}` : "—"}
                       </td>
@@ -580,9 +624,85 @@ export default function Dashboard() {
                   type="submit"
                   className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white py-2.5 rounded-lg font-medium transition-all text-sm"
                 >
-                  Save Dividends
+                  Add Dividends
                 </button>
               </form>
+            </div>
+
+            {/* Cash Fund */}
+            <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-xl p-6 shadow-2xl">
+              <h2 className="text-sm font-semibold mb-4 text-cyan-100 uppercase tracking-wider">Cash / Fund Deposits</h2>
+              <form onSubmit={addCashFund} className="space-y-4">
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
+                    Deposit Amount ({displayCurrency})
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={cashFundDeposit}
+                    onChange={(e) => setCashFundDeposit(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white outline-none focus:border-cyan-500 transition-colors text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
+                    Current Value ({displayCurrency})
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={cashFundValue}
+                    onChange={(e) => setCashFundValue(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white outline-none focus:border-cyan-500 transition-colors text-sm"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white py-2.5 rounded-lg font-medium transition-all text-sm"
+                >
+                  Add Cash Fund
+                </button>
+              </form>
+
+              {/* Cash Fund List */}
+              {cashFunds.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  <div className="flex justify-between text-[10px] text-slate-400 uppercase tracking-wider px-1">
+                    <span>Deposit</span>
+                    <span>Value</span>
+                    <span>Return</span>
+                    <span></span>
+                  </div>
+                  {cashFunds.map((fund, idx) => {
+                    const ret = fund.deposit > 0 ? ((fund.currentValue - fund.deposit) / fund.deposit) * 100 : 0;
+                    return (
+                      <div key={`cash-${idx}`} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2 text-sm">
+                        <span className="text-slate-300 tabular-nums">{currencySymbol}{fund.deposit.toLocaleString()}</span>
+                        <span className="text-cyan-200 tabular-nums">{currencySymbol}{fund.currentValue.toLocaleString()}</span>
+                        <span className={`tabular-nums font-medium ${ret >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {ret > 0 ? '+' : ''}{ret.toFixed(2)}%
+                        </span>
+                        <button onClick={() => deleteCashFund(idx)} className="p-1 text-slate-500 hover:text-red-400 transition-colors">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  <div className="flex items-center justify-between bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-3 py-2 text-sm mt-2">
+                    <span className="text-slate-300 font-medium">Total</span>
+                    <span className="text-slate-300 tabular-nums">{currencySymbol}{totalCashDeposit.toLocaleString()}</span>
+                    <span className="text-cyan-200 tabular-nums">{currencySymbol}{totalCashValue.toLocaleString()}</span>
+                    <span className={`tabular-nums font-medium ${cashFundReturn >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {cashFundReturn > 0 ? '+' : ''}{cashFundReturn.toFixed(2)}%
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Asset Allocation */}
