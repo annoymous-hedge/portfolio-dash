@@ -81,7 +81,8 @@ export default function Dashboard() {
   const [cashFundName, setCashFundName] = useState("");
   const [cashFundDeposit, setCashFundDeposit] = useState("");
   const [cashFundValue, setCashFundValue] = useState("");
-  const [cashFunds, setCashFunds] = useState<{name: string; deposit: number; currentValue: number}[]>([]);
+  const [cashFundCurrency, setCashFundCurrency] = useState<"USD" | "MYR">("USD");
+  const [cashFunds, setCashFunds] = useState<{name: string; deposit: number; currentValue: number; currency: "USD" | "MYR"}[]>([]);
 
   const [newTicker, setNewTicker] = useState("");
   const[newReference, setNewReference] = useState("");
@@ -382,6 +383,14 @@ export default function Dashboard() {
     setDivAmount("");
   };
 
+  // Helper: convert an amount from its stored currency to the active display currency
+  const toDisplay = (amount: number, fromCurrency: "USD" | "MYR"): number => {
+    if (fromCurrency === displayCurrency) return amount;
+    if (fromCurrency === "USD" && displayCurrency === "MYR") return amount * myrUsdRate;
+    if (fromCurrency === "MYR" && displayCurrency === "USD") return amount / myrUsdRate;
+    return amount;
+  };
+
   const addCashFund = (e: React.FormEvent) => {
     e.preventDefault();
     const name = cashFundName.trim();
@@ -393,18 +402,20 @@ export default function Dashboard() {
     if (dep === 0 && val === 0) return;
 
     setCashFunds((prev) => {
-      let newFunds: {name: string; deposit: number; currentValue: number}[];
+      let newFunds: {name: string; deposit: number; currentValue: number; currency: "USD" | "MYR"}[];
       const existingIdx = prev.findIndex((f) => f.name === name);
       if (existingIdx >= 0) {
+        // Only allow adding to a fund if the currency matches
         const updated = [...prev];
         updated[existingIdx] = {
           ...updated[existingIdx],
           deposit: updated[existingIdx].deposit + dep,
           currentValue: updated[existingIdx].currentValue + val,
+          currency: cashFundCurrency, // update currency on top-up
         };
         newFunds = updated;
       } else {
-        newFunds = [...prev, { name, deposit: dep, currentValue: val }];
+        newFunds = [...prev, { name, deposit: dep, currentValue: val, currency: cashFundCurrency }];
       }
       void saveSettings(totalDeposit, depositCurrency, newFunds);
       return newFunds;
@@ -437,8 +448,8 @@ export default function Dashboard() {
     ? metrics.holdings.reduce((sum, h) => sum + (h.dividends_received_display || 0), 0)
     : 0;
 
-  const totalCashDeposit = cashFunds.reduce((sum, f) => sum + f.deposit, 0);
-  const totalCashValue = cashFunds.reduce((sum, f) => sum + f.currentValue, 0);
+  const totalCashDeposit = cashFunds.reduce((sum, f) => sum + toDisplay(f.deposit, f.currency ?? "USD"), 0);
+  const totalCashValue = cashFunds.reduce((sum, f) => sum + toDisplay(f.currentValue, f.currency ?? "USD"), 0);
   const cashFundReturn = totalCashDeposit > 0 ? ((totalCashValue - totalCashDeposit) / totalCashDeposit) * 100 : 0;
   const cashFundPnl = totalCashValue - totalCashDeposit;
 
@@ -461,7 +472,7 @@ export default function Dashboard() {
   }));
   const cashPieData = cashFunds.map(f => ({
     reference: f.name,
-    market_value: f.currentValue,
+    market_value: toDisplay(f.currentValue, f.currency ?? "USD"),
     isCashFund: true,
   }));
   const pieData = [...holdingsPieData, ...cashPieData];
@@ -661,27 +672,30 @@ export default function Dashboard() {
 
                   {/* Cash Fund rows in ledger */}
                   {cashFunds.map((fund, idx) => {
+                    const fundCurrency = fund.currency ?? "USD";
+                    const dispDeposit = toDisplay(fund.deposit, fundCurrency);
+                    const dispValue = toDisplay(fund.currentValue, fundCurrency);
                     const ret = fund.deposit > 0 ? ((fund.currentValue - fund.deposit) / fund.deposit) * 100 : 0;
-                    const pnl = fund.currentValue - fund.deposit;
+                    const pnl = dispValue - dispDeposit;
                     return (
                       <tr key={`cash-ledger-${idx}`} className="border-b border-white/5 hover:bg-white/[0.03] transition-colors bg-purple-500/[0.03]">
                         <td className="py-2 pl-2 w-28 max-w-[7rem]">
                           <div className="font-bold text-purple-300 text-sm truncate max-w-[6.5rem]">{fund.name}</div>
-                          <div className="text-[10px] text-purple-400/70 uppercase tracking-wider">Cash Fund</div>
+                          <div className="text-[10px] text-purple-400/70 uppercase tracking-wider">Cash Fund · {fundCurrency}</div>
                         </td>
                         <td className="py-2 text-right text-slate-500">—</td>
                         <td className="py-2 text-right text-slate-500">—</td>
-                        <td className="py-2 text-right text-slate-300 tabular-nums">{currencySymbol}{fund.deposit.toLocaleString()}</td>
-                        <td className="py-2 text-right text-cyan-200 font-medium tabular-nums">{currencySymbol}{fund.currentValue.toLocaleString()}</td>
+                        <td className="py-2 text-right text-slate-300 tabular-nums">{currencySymbol}{dispDeposit.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                        <td className="py-2 text-right text-cyan-200 font-medium tabular-nums">{currencySymbol}{dispValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                         <td className="py-2 text-right text-slate-500">—</td>
                         <td className={`py-2 text-right font-medium tabular-nums ${ret >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                           {ret > 0 ? '+' : ''}{ret.toFixed(1)}%
                         </td>
                         <td className="py-2 text-right text-slate-500">—</td>
                         <td className="py-2 text-right text-slate-500">—</td>
-                        <td className="py-2 text-right text-cyan-200 tabular-nums">{currencySymbol}{fund.currentValue.toLocaleString()}</td>
+                        <td className="py-2 text-right text-cyan-200 tabular-nums">{currencySymbol}{dispValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                         <td className={`py-2 text-right tabular-nums ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {currencySymbol}{pnl.toLocaleString()}
+                          {currencySymbol}{pnl.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                         </td>
                         <td className="py-2 text-center">
                           <button
@@ -866,23 +880,36 @@ export default function Dashboard() {
                         <button
                           key={`qf-${f.name}`}
                           type="button"
-                          onClick={() => setCashFundName(f.name)}
+                          onClick={() => { setCashFundName(f.name); setCashFundCurrency(f.currency ?? "USD"); }}
                           className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
                             cashFundName === f.name
                               ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
                               : 'border-white/10 bg-white/5 text-slate-400 hover:text-white'
                           }`}
                         >
-                          {f.name}
+                          {f.name} <span className="opacity-60">·{f.currency ?? "USD"}</span>
                         </button>
                       ))}
                     </div>
                   )}
                 </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
+                    Fund Currency
+                  </label>
+                  <select
+                    value={cashFundCurrency}
+                    onChange={(e) => setCashFundCurrency(e.target.value as "USD" | "MYR")}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-cyan-500 transition-colors text-sm"
+                  >
+                    <option value="USD">USD ($)</option>
+                    <option value="MYR">MYR (RM)</option>
+                  </select>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
-                      + Deposit ({displayCurrency})
+                      + Deposit ({cashFundCurrency})
                     </label>
                     <input
                       type="number"
@@ -896,7 +923,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
-                      + Value ({displayCurrency})
+                      + Value ({cashFundCurrency})
                     </label>
                     <input
                       type="number"
