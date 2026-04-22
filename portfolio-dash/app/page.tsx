@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import axios from "axios";
 import { v4 as uuidv4 } from "uuid";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
-import { Activity, DollarSign, PieChart as PieChartIcon, TrendingUp, Plus, Trash2, Award, AlertTriangle, Calendar } from "lucide-react";
+import { Activity, DollarSign, PieChart as PieChartIcon, TrendingUp, Plus, Trash2, Award, AlertTriangle, Calendar, Wallet } from "lucide-react";
 import ParticleBackground from "@/components/ParticleBackground";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -68,10 +68,15 @@ export default function Dashboard() {
   const [loadingHoldings, setLoadingHoldings] = useState(true);
   const [displayCurrency, setDisplayCurrency] = useState<"USD" | "MYR">("USD");
 
-  // Cash fund tracking
+  // Portfolio deposit amount for absolute return
+  const [depositInput, setDepositInput] = useState("");
+  const [totalDeposit, setTotalDeposit] = useState(0);
+
+  // Cash fund tracking (named funds with additive deposit/value)
+  const [cashFundName, setCashFundName] = useState("");
   const [cashFundDeposit, setCashFundDeposit] = useState("");
   const [cashFundValue, setCashFundValue] = useState("");
-  const [cashFunds, setCashFunds] = useState<{deposit: number; currentValue: number}[]>([]);
+  const [cashFunds, setCashFunds] = useState<{name: string; deposit: number; currentValue: number}[]>([]);
 
   const [newTicker, setNewTicker] = useState("");
   const[newReference, setNewReference] = useState("");
@@ -319,10 +324,30 @@ export default function Dashboard() {
 
   const addCashFund = (e: React.FormEvent) => {
     e.preventDefault();
+    const name = cashFundName.trim();
     const deposit = Number(cashFundDeposit);
     const value = Number(cashFundValue);
-    if (!Number.isFinite(deposit) || deposit <= 0 || !Number.isFinite(value) || value <= 0) return;
-    setCashFunds((prev) => [...prev, { deposit, currentValue: value }]);
+    if (!name) return;
+    // At least one of deposit or value must be provided
+    const dep = Number.isFinite(deposit) && deposit > 0 ? deposit : 0;
+    const val = Number.isFinite(value) && value > 0 ? value : 0;
+    if (dep === 0 && val === 0) return;
+
+    setCashFunds((prev) => {
+      const existingIdx = prev.findIndex((f) => f.name === name);
+      if (existingIdx >= 0) {
+        // Add to existing fund
+        const updated = [...prev];
+        updated[existingIdx] = {
+          ...updated[existingIdx],
+          deposit: updated[existingIdx].deposit + dep,
+          currentValue: updated[existingIdx].currentValue + val,
+        };
+        return updated;
+      }
+      return [...prev, { name, deposit: dep, currentValue: val }];
+    });
+    setCashFundName("");
     setCashFundDeposit("");
     setCashFundValue("");
   };
@@ -331,18 +356,27 @@ export default function Dashboard() {
     setCashFunds((prev) => prev.filter((_, i) => i !== indexToRemove));
   };
 
+  const addDeposit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = Number(depositInput);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    setTotalDeposit((prev) => prev + amount);
+    setDepositInput("");
+  };
+
   // Computed values for KPI cards
   const totalDividendsReceived = metrics
     ? metrics.holdings.reduce((sum, h) => sum + (h.dividends_received_display || 0), 0)
     : 0;
 
-  const absoluteReturn = metrics
-    ? metrics.total_pnl_percent
-    : 0;
-
   const totalCashDeposit = cashFunds.reduce((sum, f) => sum + f.deposit, 0);
   const totalCashValue = cashFunds.reduce((sum, f) => sum + f.currentValue, 0);
   const cashFundReturn = totalCashDeposit > 0 ? ((totalCashValue - totalCashDeposit) / totalCashDeposit) * 100 : 0;
+
+  // Absolute return = (profit + total div received) / total deposit amount
+  const totalProfit = metrics?.total_pnl || 0;
+  const absoluteReturnValue = totalProfit + totalDividendsReceived;
+  const absoluteReturnPercent = totalDeposit > 0 ? (absoluteReturnValue / totalDeposit) * 100 : 0;
 
   const pieData = metrics?.holdings || holdings.map(h => ({
     reference: h.reference,
@@ -428,12 +462,12 @@ export default function Dashboard() {
           />
           <KPICard
             title="Absolute Return"
-            value={`${absoluteReturn > 0 ? "+" : ""}${absoluteReturn.toFixed(2)}%`}
-            subtitle={`${currencySymbol}${metrics?.total_pnl?.toLocaleString() || "0.00"}`}
+            value={totalDeposit > 0 ? `${absoluteReturnPercent > 0 ? "+" : ""}${absoluteReturnPercent.toFixed(2)}%` : "—"}
+            subtitle={`${currencySymbol}${absoluteReturnValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             subtitlePlain
             icon={<TrendingUp />}
-            isPositive={absoluteReturn >= 0}
-            glow={absoluteReturn >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}
+            isPositive={absoluteReturnPercent >= 0}
+            glow={absoluteReturnPercent >= 0 ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"}
           />
           <KPICard title="Active Assets" value={holdings.length.toString()} icon={<PieChartIcon />} glow="rgba(192,132,252,0.15)" />
           <KPICard title="Best Performer" value={metrics?.best_performer || "N/A"} subtitle={`${metrics?.best_performer_pnl || 0}%`} icon={<Award />} isPositive={true} glow="rgba(52,211,153,0.15)" />
@@ -448,29 +482,25 @@ export default function Dashboard() {
             </h2>
             {fetchError && (
               <p className="mb-4 text-xs text-amber-400/95 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-                Market data unavailable: {fetchError}. Showing positions only. For local dev, run{" "}
-                <code className="text-cyan-300/90">npm run dev:api</code> in another terminal and start{" "}
-                <code className="text-cyan-300/90">next dev</code> with <code className="text-cyan-300/90">USE_PYTHON_API=1</code> so{" "}
-                <code className="text-cyan-300/90">/api/portfolio</code> can proxy to FastAPI (or use{" "}
-                <code className="text-cyan-300/90">vercel dev</code>).
+                Market data unavailable: {fetchError}. Showing positions only.
               </p>
             )}
             <div className="overflow-x-auto flex-1">
-              <table className="w-full min-w-[1100px] text-left border-collapse whitespace-nowrap">
+              <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="text-slate-400 border-b border-white/10 text-xs uppercase tracking-wider">
-                    <th className="pb-4 pl-2 font-medium">Asset Identity</th>
-                    <th className="pb-4 pr-2 text-right font-medium">Weight</th>
-                    <th className="pb-4 pl-2 font-medium">Shares</th>
-                    <th className="pb-4 pl-4 font-medium">Avg Cost</th>
-                    <th className="pb-4 pl-4 font-medium">Current</th>
-                    <th className="pb-4 text-right font-medium">1d %</th>
-                    <th className="pb-4 text-right font-medium">Return %</th>
-                    <th className="pb-4 text-right font-medium">Ann. Return</th>
-                    <th className="pb-4 text-right font-medium">Div Received</th>
-                    <th className="pb-4 text-right font-medium">Value ({displayCurrency})</th>
-                    <th className="pb-4 text-right font-medium">Total P/L ({displayCurrency})</th>
-                    <th className="pb-4 text-center font-medium">Drop</th>
+                  <tr className="text-slate-400 border-b border-white/10 uppercase tracking-wider">
+                    <th className="pb-3 pl-2 font-medium">Asset</th>
+                    <th className="pb-3 text-right font-medium">Wt%</th>
+                    <th className="pb-3 text-right font-medium">Shares</th>
+                    <th className="pb-3 text-right font-medium">Avg</th>
+                    <th className="pb-3 text-right font-medium">Price</th>
+                    <th className="pb-3 text-right font-medium">1d%</th>
+                    <th className="pb-3 text-right font-medium">Ret%</th>
+                    <th className="pb-3 text-right font-medium">Ann%</th>
+                    <th className="pb-3 text-right font-medium">Div</th>
+                    <th className="pb-3 text-right font-medium">Value</th>
+                    <th className="pb-3 text-right font-medium">P/L</th>
+                    <th className="pb-3 text-center font-medium w-8"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -491,55 +521,91 @@ export default function Dashboard() {
                         setHoveredAssetIndex(null);
                       }}
                     >
-                      <td className="py-3 pl-2">
-                        <div className="font-bold text-white relative">
+                      <td className="py-2 pl-2">
+                        <div className="font-bold text-white text-sm relative">
                           {holding.reference}
                           {hoveredAssetIndex === i && (
-                            <span className="absolute left-0 top-full mt-1 px-2 py-1 rounded bg-black/80 border border-white/10 text-[10px] text-slate-200 whitespace-nowrap">
+                            <span className="absolute left-0 top-full mt-1 px-2 py-1 rounded bg-black/80 border border-white/10 text-[10px] text-slate-200 whitespace-nowrap z-20">
                               Purchased: {holding.purchase_date}
                             </span>
                           )}
                         </div>
-                        {holding.reference !== holding.ticker && <div className="text-[10px] text-cyan-400 uppercase tracking-wider mt-0.5">{holding.ticker}</div>}
+                        {holding.reference !== holding.ticker && <div className="text-[10px] text-cyan-400 uppercase tracking-wider">{holding.ticker}</div>}
                       </td>
-                      <td className="py-3 pr-2 text-right text-slate-300 tabular-nums">{live && h != null && h.weight_percent != null ? `${h.weight_percent.toFixed(2)}%` : "—"}</td>
-                      <td className="py-3 pl-2 text-slate-300">{holding.shares}</td>
-                      <td className="py-3 pl-4 text-slate-300">
-                        {live ? `${h!.avg_price.toFixed(2)} ${h!.quote_currency}` : `${holding.avg_price.toFixed(2)}`}
+                      <td className="py-2 text-right text-slate-300 tabular-nums">{live && h != null && h.weight_percent != null ? `${h.weight_percent.toFixed(1)}%` : "—"}</td>
+                      <td className="py-2 text-right text-slate-300 tabular-nums">{holding.shares}</td>
+                      <td className="py-2 text-right text-slate-300 tabular-nums">
+                        {live ? h!.avg_price.toFixed(2) : holding.avg_price.toFixed(2)}
                       </td>
-                      <td className="py-3 pl-4 text-cyan-200 font-medium">
-                        {live ? `${h!.current_price.toFixed(2)} ${h!.quote_currency}` : <span className="text-slate-500">—</span>}
+                      <td className="py-2 text-right text-cyan-200 font-medium tabular-nums">
+                        {live ? h!.current_price.toFixed(2) : <span className="text-slate-500">—</span>}
                       </td>
 
-                      <td className={`py-3 text-right font-medium tabular-nums ${live ? (h!.daily_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
-                        {live ? `${h!.daily_return_percent > 0 ? '+' : ''}${h!.daily_return_percent.toFixed(2)}%` : "—"}
+                      <td className={`py-2 text-right font-medium tabular-nums ${live ? (h!.daily_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
+                        {live ? `${h!.daily_return_percent > 0 ? '+' : ''}${h!.daily_return_percent.toFixed(1)}%` : "—"}
                       </td>
-                      <td className={`py-3 text-right font-medium ${live ? (h!.pnl_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
+                      <td className={`py-2 text-right font-medium tabular-nums ${live ? (h!.pnl_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
                         {live ? `${h!.pnl_percent > 0 ? '+' : ''}${h!.pnl_percent}%` : "—"}
                       </td>
-                      <td className={`py-3 text-right font-medium ${live ? (h!.ann_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
+                      <td className={`py-2 text-right font-medium tabular-nums ${live ? (h!.ann_return_percent >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
                         {live ? `${h!.ann_return_percent > 0 ? '+' : ''}${h!.ann_return_percent}%` : "—"}
                       </td>
 
-                      <td className="py-3 text-right text-slate-300 tabular-nums">
+                      <td className="py-2 text-right text-slate-300 tabular-nums">
                         {live ? `${currencySymbol}${h!.dividends_received_display.toLocaleString()}` : "—"}
                       </td>
-                      <td className="py-3 text-right text-slate-300">
+                      <td className="py-2 text-right text-slate-300 tabular-nums">
                         {live ? `${currencySymbol}${h!.market_value.toLocaleString()}` : "—"}
                       </td>
-                      <td className={`py-3 text-right ${live ? (h!.pnl >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
+                      <td className={`py-2 text-right tabular-nums ${live ? (h!.pnl >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
                         {live ? `${currencySymbol}${h!.pnl.toLocaleString()}` : "—"}
                       </td>
 
-                      <td className="py-3 text-center">
+                      <td className="py-2 text-center">
                         <button
                           onClick={() => deleteHolding(i)}
-                          className="p-2 text-slate-500 hover:text-red-400 transition-colors"
+                          className="p-1 text-slate-500 hover:text-red-400 transition-colors"
                         >
-                          <Trash2 className="w-4 h-4 mx-auto" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </td>
                     </tr>
+                    );
+                  })}
+
+                  {/* Cash Fund rows in ledger */}
+                  {cashFunds.map((fund, idx) => {
+                    const ret = fund.deposit > 0 ? ((fund.currentValue - fund.deposit) / fund.deposit) * 100 : 0;
+                    const pnl = fund.currentValue - fund.deposit;
+                    return (
+                      <tr key={`cash-ledger-${idx}`} className="border-b border-white/5 hover:bg-white/[0.03] transition-colors bg-purple-500/[0.03]">
+                        <td className="py-2 pl-2">
+                          <div className="font-bold text-purple-300 text-sm">{fund.name}</div>
+                          <div className="text-[10px] text-purple-400/70 uppercase tracking-wider">Cash Fund</div>
+                        </td>
+                        <td className="py-2 text-right text-slate-500">—</td>
+                        <td className="py-2 text-right text-slate-500">—</td>
+                        <td className="py-2 text-right text-slate-300 tabular-nums">{currencySymbol}{fund.deposit.toLocaleString()}</td>
+                        <td className="py-2 text-right text-cyan-200 font-medium tabular-nums">{currencySymbol}{fund.currentValue.toLocaleString()}</td>
+                        <td className="py-2 text-right text-slate-500">—</td>
+                        <td className={`py-2 text-right font-medium tabular-nums ${ret >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {ret > 0 ? '+' : ''}{ret.toFixed(1)}%
+                        </td>
+                        <td className="py-2 text-right text-slate-500">—</td>
+                        <td className="py-2 text-right text-slate-500">—</td>
+                        <td className="py-2 text-right text-cyan-200 tabular-nums">{currencySymbol}{fund.currentValue.toLocaleString()}</td>
+                        <td className={`py-2 text-right tabular-nums ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {currencySymbol}{pnl.toLocaleString()}
+                        </td>
+                        <td className="py-2 text-center">
+                          <button
+                            onClick={() => deleteCashFund(idx)}
+                            className="p-1 text-slate-500 hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
                     );
                   })}
                 </tbody>
@@ -629,34 +695,20 @@ export default function Dashboard() {
               </form>
             </div>
 
-            {/* Cash Fund */}
+            {/* Portfolio Deposit */}
             <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-xl p-6 shadow-2xl">
-              <h2 className="text-sm font-semibold mb-4 text-cyan-100 uppercase tracking-wider">Cash / Fund Deposits</h2>
-              <form onSubmit={addCashFund} className="space-y-4">
+              <h2 className="text-sm font-semibold mb-4 text-cyan-100 uppercase tracking-wider">Portfolio Deposit</h2>
+              <form onSubmit={addDeposit} className="space-y-4">
                 <div>
                   <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
-                    Deposit Amount ({displayCurrency})
+                    Add Deposit Amount ({displayCurrency})
                   </label>
                   <input
                     type="number"
                     step="any"
                     min="0"
-                    value={cashFundDeposit}
-                    onChange={(e) => setCashFundDeposit(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white outline-none focus:border-cyan-500 transition-colors text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
-                    Current Value ({displayCurrency})
-                  </label>
-                  <input
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={cashFundValue}
-                    onChange={(e) => setCashFundValue(e.target.value)}
+                    value={depositInput}
+                    onChange={(e) => setDepositInput(e.target.value)}
                     placeholder="0.00"
                     className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white outline-none focus:border-cyan-500 transition-colors text-sm"
                   />
@@ -665,44 +717,94 @@ export default function Dashboard() {
                   type="submit"
                   className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white py-2.5 rounded-lg font-medium transition-all text-sm"
                 >
-                  Add Cash Fund
+                  Add Deposit
                 </button>
               </form>
+              <div className="mt-3 flex items-center justify-between bg-white/5 rounded-lg px-3 py-2 text-sm">
+                <span className="text-slate-400">Total Deposited</span>
+                <span className="text-white font-medium tabular-nums">{currencySymbol}{totalDeposit.toLocaleString()}</span>
+              </div>
+              {totalDeposit > 0 && (
+                <button
+                  onClick={() => setTotalDeposit(0)}
+                  className="mt-2 text-[10px] text-slate-500 hover:text-red-400 transition-colors"
+                >
+                  Reset deposit
+                </button>
+              )}
+            </div>
 
-              {/* Cash Fund List */}
-              {cashFunds.length > 0 && (
-                <div className="mt-4 space-y-2">
-                  <div className="flex justify-between text-[10px] text-slate-400 uppercase tracking-wider px-1">
-                    <span>Deposit</span>
-                    <span>Value</span>
-                    <span>Return</span>
-                    <span></span>
-                  </div>
-                  {cashFunds.map((fund, idx) => {
-                    const ret = fund.deposit > 0 ? ((fund.currentValue - fund.deposit) / fund.deposit) * 100 : 0;
-                    return (
-                      <div key={`cash-${idx}`} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2 text-sm">
-                        <span className="text-slate-300 tabular-nums">{currencySymbol}{fund.deposit.toLocaleString()}</span>
-                        <span className="text-cyan-200 tabular-nums">{currencySymbol}{fund.currentValue.toLocaleString()}</span>
-                        <span className={`tabular-nums font-medium ${ret >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {ret > 0 ? '+' : ''}{ret.toFixed(2)}%
-                        </span>
-                        <button onClick={() => deleteCashFund(idx)} className="p-1 text-slate-500 hover:text-red-400 transition-colors">
-                          <Trash2 className="w-3.5 h-3.5" />
+            {/* Cash Fund */}
+            <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-xl p-6 shadow-2xl">
+              <h2 className="text-sm font-semibold mb-4 text-cyan-100 uppercase tracking-wider">Cash / Fund Deposits</h2>
+              <form onSubmit={addCashFund} className="space-y-4">
+                <div>
+                  <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
+                    Fund Name
+                  </label>
+                  <input
+                    type="text"
+                    value={cashFundName}
+                    onChange={(e) => setCashFundName(e.target.value)}
+                    placeholder="e.g. StashAway, FD"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-cyan-500 transition-colors text-sm"
+                  />
+                  {cashFunds.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {cashFunds.map((f) => (
+                        <button
+                          key={`qf-${f.name}`}
+                          type="button"
+                          onClick={() => setCashFundName(f.name)}
+                          className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                            cashFundName === f.name
+                              ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
+                              : 'border-white/10 bg-white/5 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {f.name}
                         </button>
-                      </div>
-                    );
-                  })}
-                  <div className="flex items-center justify-between bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-3 py-2 text-sm mt-2">
-                    <span className="text-slate-300 font-medium">Total</span>
-                    <span className="text-slate-300 tabular-nums">{currencySymbol}{totalCashDeposit.toLocaleString()}</span>
-                    <span className="text-cyan-200 tabular-nums">{currencySymbol}{totalCashValue.toLocaleString()}</span>
-                    <span className={`tabular-nums font-medium ${cashFundReturn >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {cashFundReturn > 0 ? '+' : ''}{cashFundReturn.toFixed(2)}%
-                    </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
+                      + Deposit ({displayCurrency})
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={cashFundDeposit}
+                      onChange={(e) => setCashFundDeposit(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-cyan-500 transition-colors text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
+                      + Value ({displayCurrency})
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={cashFundValue}
+                      onChange={(e) => setCashFundValue(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-cyan-500 transition-colors text-sm"
+                    />
                   </div>
                 </div>
-              )}
+                <button
+                  type="submit"
+                  className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white py-2.5 rounded-lg font-medium transition-all text-sm"
+                >
+                  Add / Update Fund
+                </button>
+              </form>
             </div>
 
             {/* Asset Allocation */}
