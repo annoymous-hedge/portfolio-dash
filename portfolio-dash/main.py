@@ -58,19 +58,35 @@ def get_fx_rate(display_currency: str) -> float:
 
 
 def get_stock_price(ticker_obj: yf.Ticker, avg_price: float):
-    """Return (current_price, prev_close) using fast_info for real-time data.
-    Falls back to history() if fast_info is unavailable.
+    """Return (current_price, prev_close).
+
+    Priority:
+      1. ticker.info['regularMarketPrice'] / 'regularMarketPreviousClose'
+         — real-time intraday price for most exchanges.
+      2. fast_info.last_price / previous_close  — lightweight fallback.
+      3. history(period='5d')                   — last-resort offline fallback.
     """
+    # ── 1. regularMarketPrice from .info ──────────────────────────────────────
     try:
-        fi = ticker_obj.fast_info
+        info = ticker_obj.info
+        current = info.get("regularMarketPrice") or 0.0
+        prev    = info.get("regularMarketPreviousClose") or 0.0
+        if current and current > 0:
+            return float(current), float(prev) if prev > 0 else float(current)
+    except Exception:
+        pass
+
+    # ── 2. fast_info (lighter / cached) ───────────────────────────────────────
+    try:
+        fi      = ticker_obj.fast_info
         current = float(fi.last_price)
-        prev = float(fi.previous_close) if fi.previous_close else current
+        prev    = float(fi.previous_close) if fi.previous_close else current
         if current and current > 0:
             return current, prev
     except Exception:
         pass
 
-    # Fallback: daily history (previous-day close during market hours)
+    # ── 3. Daily history ───────────────────────────────────────────────────────
     try:
         hist = ticker_obj.history(period="5d")
         if len(hist) >= 2:
